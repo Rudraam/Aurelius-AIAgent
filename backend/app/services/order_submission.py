@@ -1,5 +1,13 @@
 """Submitting a confirmed draft, and the human-gated path after a failed submit.
 
+Gates checked by ``check_submittable`` before any state change or call. Each failure raises a
+``SubmissionBlocked`` subclass, leaves the draft untouched, and calls nothing:
+- invariant 2: ``trading_enabled`` must be true, so with trading off ``create`` is unreachable;
+- the draft must be ``previewed`` and the operation must be ``create`` (no modify or cancel);
+- invariant 4: a stored preview must exist, the hash of the args about to be sent must equal the
+  stored preview hash, and the hash the human confirmed must equal it too;
+- the preview must be younger than ``PREVIEW_MAX_AGE`` (5 minutes).
+
 Invariant 5 (absolute): ``create_order_instruction`` is called at most once per submit, never retried.
 - Auth failures (``AuthExpired``/``ReauthRequired``) happen before any tool runs (pre-refresh failure,
   or a 401/403 from the edge on the approval session), so the draft goes to ``submit_failed``.
@@ -12,14 +20,53 @@ Invariant 5 (absolute): ``create_order_instruction`` is called at most once per 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Sequence
+import secrets
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from types import MappingProxyType
+from typing import Any
 
-from app.domain.order_state import OrderDraft, OrderStatus
+from app.domain.order_args import order_args_hash
+from app.domain.order_state import OrderDraft, OrderStatus, check_transition
 from app.integrations.questrade.errors import AuthExpired, ReauthRequired, find_in_chain
 
 Clock = Callable[[], datetime]
+
+PREVIEW_MAX_AGE = timedelta(minutes=5)
+#: The "created since the attempt" window starts this long before the attempt, to tolerate clock
+#: skew between the VM and Questrade.
+RESUBMIT_SKEW_TOLERANCE = timedelta(minutes=2)
+
+
+@dataclass(frozen=True, slots=True)
+class SubmitPolicy:
+    trading_enabled: bool  # AURELIUS_TRADING_ENABLED; defaults to false in config
+    max_preview_age: timedelta = PREVIEW_MAX_AGE
+
+
+class SubmissionBlocked(Exception):
+    """Base class: the submit was refused before any state change or Questrade call."""
+
+
+class TradingDisabled(SubmissionBlocked):
+    pass
+
+
+class OperationNotAllowed(SubmissionBlocked):
+    pass
+
+
+class PreviewMissing(SubmissionBlocked):
+    pass
+
+
+class PreviewMismatch(SubmissionBlocked):
+    pass
+
+
+class PreviewStale(SubmissionBlocked):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,8 +82,8 @@ class InstructionSummary:
     created_at: datetime | None
 
 
-#: Performs exactly one ``create_order_instruction`` call on the approval session.
-CreateFn = Callable[[], Awaitable[CreateOutcome]]
+#: Performs exactly one ``create_order_instruction`` call on the approval session, with exactly these args.
+CreateFn = Callable[[Mapping[str, Any]], Awaitable[CreateOutcome]]
 ListInstructionsFn = Callable[[str], Awaitable[Sequence[InstructionSummary]]]
 
 
@@ -44,12 +91,46 @@ class ResubmissionBlocked(Exception):
     pass
 
 
-async def submit_draft(draft: OrderDraft, create: CreateFn, clock: Clock) -> OrderDraft:
+def check_submittable(
+    draft: OrderDraft,
+    create_args: Mapping[str, Any],
+    confirmed_preview_hash: str,
+    policy: SubmitPolicy,
+    now: datetime,
+) -> None:
+    """Raise ``SubmissionBlocked`` (or ``IllegalTransition``) unless every submit gate passes. Pure."""
+    if not policy.trading_enabled:
+        raise TradingDisabled("AURELIUS_TRADING_ENABLED is false; order submission is disabled")
+    check_transition(draft.status, OrderStatus.SUBMITTED)
+    if create_args.get("operation") != "create":
+        raise OperationNotAllowed(f"operation must be 'create', got {create_args.get('operation')!r}")
+    if draft.preview_args_hash is None or draft.previewed_at is None:
+        raise PreviewMissing("no stored preview for this draft; preview before submitting")
+    if not secrets.compare_digest(order_args_hash(create_args), draft.preview_args_hash):
+        raise PreviewMismatch("create arguments do not match the stored preview")
+    if not secrets.compare_digest(confirmed_preview_hash, draft.preview_args_hash):
+        raise PreviewMismatch("the confirmed preview hash does not match the stored preview")
+    age = now - draft.previewed_at
+    if age < timedelta(0) or age >= policy.max_preview_age:
+        raise PreviewStale(f"preview is {int(age.total_seconds())}s old; preview again (max {policy.max_preview_age})")
+
+
+async def submit_draft(
+    draft: OrderDraft,
+    *,
+    create_args: Mapping[str, Any],
+    confirmed_preview_hash: str,
+    create: CreateFn,
+    policy: SubmitPolicy,
+    clock: Clock,
+) -> OrderDraft:
+    sent = MappingProxyType(dict(create_args))  # freeze: what is checked is exactly what is sent
     now = clock()
+    check_submittable(draft, sent, confirmed_preview_hash, policy, now)
     draft.transition(OrderStatus.SUBMITTED, "confirmed in Aurelius; calling create_order_instruction once", now)
     draft.submitted_at = now
     try:
-        outcome = await create()
+        outcome = await create(sent)
     except asyncio.CancelledError:
         draft.transition(OrderStatus.UNKNOWN, "cancelled during create; outcome unknown", clock())
         raise
@@ -88,7 +169,7 @@ async def authorize_resubmission(
     confirmed_by_human: bool,
     list_instructions: ListInstructionsFn,
     clock: Clock,
-    lookback: timedelta = timedelta(minutes=2),
+    lookback: timedelta = RESUBMIT_SKEW_TOLERANCE,
 ) -> OrderDraft:
     """Gate a human's request to retry a ``submit_failed`` draft.
 
@@ -120,8 +201,9 @@ async def authorize_resubmission(
         raise ResubmissionBlocked("an instruction may have been created; reconcile before any resubmission")
     draft.transition(
         OrderStatus.PREVIEWED,
-        "human-authorized resubmission; list_instructions clean",
+        "human-authorized resubmission; list_instructions clean; fresh preview required",
         clock(),
         checked_since=since.isoformat(),
     )
+    draft.clear_preview()  # structurally forces a new preview + confirmation before the next submit
     return draft

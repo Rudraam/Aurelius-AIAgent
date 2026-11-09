@@ -86,10 +86,19 @@ class OrderDraft:
     account_id: str
     idempotency_key: str
     status: OrderStatus = S.PREVIEWED
+    #: Arguments sent to preview_order_instruction, their canonical hash, and when the preview ran.
+    preview_args: dict[str, Any] | None = None
+    preview_args_hash: str | None = None
+    previewed_at: datetime | None = None
     instruction_id: str | None = None
     submitted_at: datetime | None = None
     terminal_at: datetime | None = None
     events: list[DraftEvent] = field(default_factory=list)
+
+    def clear_preview(self) -> None:
+        self.preview_args = None
+        self.preview_args_hash = None
+        self.previewed_at = None
 
     def transition(self, target: OrderStatus, reason: str, at: datetime, **payload: Any) -> None:
         check_transition(self.status, target)

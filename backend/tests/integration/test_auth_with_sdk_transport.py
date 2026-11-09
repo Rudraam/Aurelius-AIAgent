@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -10,12 +11,13 @@ import pytest
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
+from app.domain.order_args import order_args_hash
 from app.domain.order_state import OrderDraft, OrderStatus
 from app.integrations.questrade.auth import TokenManager
 from app.integrations.questrade.errors import AuthExpired, ReauthRequired, find_in_chain
 from app.integrations.questrade.token_store import AuthState, ClientRegistration, InMemoryTokenStore, TokenSet
 from app.integrations.questrade.transport import approval_session, read_session
-from app.services.order_submission import CreateOutcome, submit_draft
+from app.services.order_submission import CreateOutcome, SubmitPolicy, submit_draft
 from tests.fakes import FakeHttp
 
 MCP_URL = "https://mcp.example.test/mcp"
@@ -135,13 +137,28 @@ async def test_approval_401_through_sdk_sends_once_executes_nothing_and_marks_su
     async with fake.client() as http, app.inner.router.lifespan_context(app.inner):
         tokens = TokenManager(store(expired=False), http, TOKEN_URL, MCP_URL)
 
-        async def create() -> CreateOutcome:
+        async def create(args: Mapping[str, Any]) -> CreateOutcome:
             async with approval_session(MCP_URL, tokens, transport=httpx2.ASGITransport(app=app)) as client:
-                await client.call_tool("create_order_instruction", {"accountId": "a", "operation": "create"})
+                await client.call_tool("create_order_instruction", dict(args))
             raise AssertionError("unreachable: the approval session must fail on 401")
 
+        now = datetime.now(UTC)
+        order = {"accountId": "a"}
+        draft = OrderDraft(
+            id="d",
+            account_id="a",
+            idempotency_key="k",
+            preview_args=order,
+            preview_args_hash=order_args_hash(order),
+            previewed_at=now - timedelta(seconds=20),
+        )
         d = await submit_draft(
-            OrderDraft(id="d", account_id="a", idempotency_key="k"), create, lambda: datetime.now(UTC)
+            draft,
+            create_args={**order, "operation": "create"},
+            confirmed_preview_hash=order_args_hash(order),
+            create=create,
+            policy=SubmitPolicy(trading_enabled=True),
+            clock=lambda: datetime.now(UTC),
         )
     assert d.status == OrderStatus.SUBMIT_FAILED
     assert app.creates_executed == 0

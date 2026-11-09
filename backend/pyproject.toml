@@ -35,7 +35,10 @@ packages = ["app"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-markers = ["live: hits real Questrade (read-only); skipped unless AURELIUS_LIVE_TESTS=1"]
+markers = [
+    "live: hits real Questrade (read-only); skipped unless AURELIUS_LIVE_TESTS=1",
+    "docker: needs a local Docker daemon; skipped when unavailable",
+]
 
 [tool.ruff]
 line-length = 120
@@ -47,6 +50,8 @@ ignore = ["S101"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106"]
+# docker CLI driven with constant args from an absolute path (shutil.which)
+"tests/deploy/**" = ["S105", "S106", "S603"]
 "scripts/**" = ["T201", "S105"]
 
 [tool.mypy]

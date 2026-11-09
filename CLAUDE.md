@@ -12,6 +12,16 @@ The full spec is in `AURELIUS_PHASE1.md`. Spike findings are in `docs/spikes/` a
    - Order: `preview_order_instruction`, plus `create_order_instruction` with `operation="create"` only.
    - Everything else raises `ToolNotAllowed`.
 4. **Preview before create.** The create args hash must equal the stored preview's hash.
+   - Enforced in `services/order_submission.check_submittable`, before any state change or call, in this order:
+     1. trading enabled (invariant 2);
+     2. status is `previewed`;
+     3. `operation == "create"`;
+     4. a stored preview exists;
+     5. `order_args_hash(create_args)` equals the stored hash;
+     6. the human-confirmed hash equals the stored hash;
+     7. the preview is between 0 and 5 minutes old.
+   - `order_args_hash` (`domain/order_args.py`) is canonical: it ignores key order, `operation` and Decimal trailing zeros, and **rejects floats**.
+   - `create` receives exactly the frozen args that were hashed.
 5. **Never auto-retry an approval tool. This is absolute, with no exceptions, including HTTP 401.**
    - Approval calls go through `approval_session` / `ApprovalBearerAuth`. It refreshes *before* the call if less than 5 minutes of token lifetime remain, and never resends.
    - Any 401 raises `AuthExpired`, and the draft moves to `submit_failed`.
@@ -66,6 +76,9 @@ The full spec is in `AURELIUS_PHASE1.md`. Spike findings are in `docs/spikes/` a
 - The DCR endpoint is `https://mcp.questrade.com/connect/register`, which is not on the issuer host (`login.questrade.com`).
 - mcp 2.x renamed `FastMCP` to `mcp.server.mcpserver.MCPServer`. The fake server and the tests use `MCPServer` with `streamable_http_app(json_response=True, stateless_http=True, transport_security=...(enable_dns_rebinding_protection=False))` over `httpx2.ASGITransport`. Start the app's lifespan with `app.router.lifespan_context(app)`.
 - `respx` only patches `httpx`. For httpx2 tests, use `tests/fakes.py::FakeHttp`, which routes requests and counts calls.
+- `tests/deploy/` runs the real Caddyfile in `caddy:2.10.2` (marker `docker`, skipped without Docker). Static files mount at `/srv/static`; docker-compose must use the same path.
+- Windows Python has no IANA tz database: `ZoneInfo("America/Toronto")` needs the `tzdata` package (not yet approved). Tests use fixed offsets until then.
+- Mutation-check new safety tests by editing a byte copy and restoring from it. Never use `git checkout --` on files with uncommitted work.
 
 ## Working conventions
 
