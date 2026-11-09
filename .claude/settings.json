@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git checkout -- *)",
+      "Bash(git checkout *-- *)",
+      "Bash(git checkout .)",
+      "Bash(git restore *)",
+      "Bash(git reset --hard)",
+      "Bash(git reset --hard *)",
+      "Bash(git reset *--hard*)",
+      "Bash(git clean)",
+      "Bash(git clean *)",
+      "Bash(git stash drop)",
+      "Bash(git stash drop *)",
+      "Bash(git stash clear)",
+      "Bash(git -C * checkout -- *)",
+      "Bash(git -C * restore *)",
+      "Bash(git -C * reset *--hard*)",
+      "Bash(git -C * clean*)",
+      "Bash(git -C * stash drop*)",
+      "PowerShell(git checkout -- *)",
+      "PowerShell(git checkout *-- *)",
+      "PowerShell(git checkout .)",
+      "PowerShell(git restore *)",
+      "PowerShell(git reset --hard)",
+      "PowerShell(git reset --hard *)",
+      "PowerShell(git reset *--hard*)",
+      "PowerShell(git clean)",
+      "PowerShell(git clean *)",
+      "PowerShell(git stash drop)",
+      "PowerShell(git stash drop *)",
+      "PowerShell(git stash clear)",
+      "PowerShell(git -C * checkout -- *)",
+      "PowerShell(git -C * restore *)",
+      "PowerShell(git -C * reset *--hard*)",
+      "PowerShell(git -C * clean*)",
+      "PowerShell(git -C * stash drop*)"
+    ]
+  }
+}
