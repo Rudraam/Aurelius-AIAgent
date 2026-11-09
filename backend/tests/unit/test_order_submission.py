@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 import pytest
 
+from app.domain.market_time import TORONTO
 from app.domain.order_args import order_args_hash
 from app.domain.order_state import ALLOWED_TRANSITIONS, TERMINAL, IllegalTransition, OrderDraft, OrderStatus
 from app.integrations.questrade.errors import AuthExpired, ReauthRequired
@@ -374,15 +375,17 @@ async def test_instruction_older_than_window_does_not_block(clock):
     assert d.status == S.PREVIEWED
 
 
-async def test_skewed_timestamp_with_offset_timezone_is_compared_correctly(clock):
-    """Questrade returns ISO 8601 with an offset (ET). 90 s after the attempt in ET must still block."""
-    from datetime import timezone
-
-    eastern_standard = timezone(timedelta(hours=-5), "EST")  # Questrade sends ISO 8601 with an ET offset
-
+@pytest.mark.parametrize("via_iso_string", [False, True], ids=["aware-datetime", "parsed-from-iso8601"])
+async def test_skewed_timestamp_with_toronto_offset_is_compared_correctly(clock, via_iso_string):
+    """Questrade returns ISO 8601 with an ET offset. 90 s after the attempt, stamped in Toronto time,
+    must still block, whether given as an aware datetime or parsed from the wire string."""
     d = await failed(clock)
     assert d.submitted_at is not None
-    created_et = (d.submitted_at + timedelta(seconds=90)).astimezone(eastern_standard)
+    created_et = (d.submitted_at + timedelta(seconds=90)).astimezone(TORONTO)
+    if via_iso_string:
+        wire = created_et.isoformat()  # e.g. 2026-11-09T10:01:30-05:00
+        assert wire.endswith("-05:00")  # 2026-11-09 is after fall back: EST
+        created_et = datetime.fromisoformat(wire)
     li = FakeInstructions([InstructionSummary("mine-et", ACCOUNT, created_et)])
     with pytest.raises(ResubmissionBlocked):
         await authorize_resubmission(d, confirmed_by_human=True, list_instructions=li, clock=clock)

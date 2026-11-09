@@ -39,6 +39,10 @@ The full spec is in `AURELIUS_PHASE1.md`. Spike findings are in `docs/spikes/` a
    - Live scripts are written for Rudra to run.
    - `scripts/manual_order_smoke.py` is Rudra's alone.
 9. **Money and time.** Money is `Decimal` / `NUMERIC(18,4)`, never float. Store timestamps in UTC and display them in America/Toronto. Keep CAD and USD separate.
+   - **Never use a fixed UTC offset for Toronto** (no `timezone(timedelta(hours=-5))`, no `"-05:00"`, no `US/Eastern`).
+   - All Toronto logic goes through `app/domain/market_time.TORONTO`, which is IANA `America/Toronto` from the `tzdata` package. It is the only `ZoneInfo(...)` call in `app/`; `tests/unit/test_no_fixed_offsets.py` enforces this.
+   - Time rules compare Toronto **wall-clock** time. On fall back, a repeated time counts on both passes, so 01:55-01:59 EDT is blocked too (fail-closed). On spring forward, the maintenance window runs from 01:55 EST straight through to 03:50 EDT with no gap.
+   - `tests/unit/test_dst.py` covers 2026-11-01 and 2027-03-14 for the maintenance window, market hours, order timing and the APScheduler 16:30 trigger.
 
 ## Auth design (decisions of 2026-11-09)
 
@@ -77,7 +81,9 @@ The full spec is in `AURELIUS_PHASE1.md`. Spike findings are in `docs/spikes/` a
 - mcp 2.x renamed `FastMCP` to `mcp.server.mcpserver.MCPServer`. The fake server and the tests use `MCPServer` with `streamable_http_app(json_response=True, stateless_http=True, transport_security=...(enable_dns_rebinding_protection=False))` over `httpx2.ASGITransport`. Start the app's lifespan with `app.router.lifespan_context(app)`.
 - `respx` only patches `httpx`. For httpx2 tests, use `tests/fakes.py::FakeHttp`, which routes requests and counts calls.
 - `tests/deploy/` runs the real Caddyfile in `caddy:2.10.2` (marker `docker`, skipped without Docker). Static files mount at `/srv/static`; docker-compose must use the same path.
-- Windows Python has no IANA tz database: `ZoneInfo("America/Toronto")` needs the `tzdata` package (not yet approved). Tests use fixed offsets until then.
+- Windows Python has no IANA tz database, so `tzdata` is a runtime dependency (approved 2026-11-09). Without it, `market_time` fails at import, which is deliberate.
+- APScheduler 3.x (`AsyncIOScheduler`) ships no type information, so it has a mypy override in `pyproject.toml`. Build triggers with `timezone=TORONTO` (`app/jobs/schedules.py`).
+- A permissions deny list in `.claude/settings.json` blocks `git checkout --`, `git restore`, `git reset --hard`, `git clean` and `git stash drop`/`clear`, for both the Bash and PowerShell tools.
 - Mutation-check new safety tests by editing a byte copy and restoring from it. Never use `git checkout --` on files with uncommitted work.
 
 ## Working conventions
@@ -88,6 +94,6 @@ The full spec is in `AURELIUS_PHASE1.md`. Spike findings are in `docs/spikes/` a
   - `uv run mypy` (strict, over `app/`)
   - `uv run pytest`
 - Docker: `docker build -t aurelius-api:dev backend/`. Check arm64 with `docker buildx build --platform linux/arm64 --load …`.
-- Ask before adding a dependency that isn't in the spec stack. Approved additions: `httpx2` (it replaces httpx), and Authlib (approved but unused).
+- Ask before adding a dependency that isn't in the spec stack. Approved additions: `httpx2` (it replaces httpx), `tzdata`, and Authlib (approved but unused). APScheduler is in the spec stack.
 - Use conventional commits, in small reviewable steps. Run gitleaks before committing. At the end of each milestone, run ruff, mypy and pytest and show the results.
 - When the docs and the server disagree, trust the server and record the difference in `docs/spikes/`.

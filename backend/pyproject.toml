@@ -11,6 +11,8 @@ dependencies = [
     "httpx2>=2.16,<3",
     "cryptography>=43",
     "pydantic>=2.9,<3",
+    "tzdata>=2025.2",
+    "apscheduler>=3.11,<4",
 ]
 
 [project.scripts]
@@ -58,3 +60,8 @@ ignore = ["S101"]
 python_version = "3.12"
 strict = true
 packages = ["app"]
+
+[[tool.mypy.overrides]]
+# APScheduler 3.x ships no type information.
+module = ["apscheduler", "apscheduler.*"]
+ignore_missing_imports = true
