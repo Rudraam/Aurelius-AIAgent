@@ -1,0 +1,16 @@
+# AURELIUS_DOMAIN is the final public host (e.g. aurelius.example.ca). Caddy obtains HTTPS automatically.
+{$AURELIUS_DOMAIN} {
+	# CIMD document: static file, and its URL is the permanent OAuth client_id. Never move it.
+	# Rendered by backend/scripts/render_cimd.py into deploy/static/oauth/client-metadata.json.
+	handle /oauth/client-metadata.json {
+		root * /srv/static
+		header Content-Type "application/json"
+		header Cache-Control "public, max-age=300"
+		file_server
+	}
+
+	# Everything else goes to the API (added in M1).
+	handle {
+		reverse_proxy api:8000
+	}
+}

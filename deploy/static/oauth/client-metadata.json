@@ -1,0 +1,16 @@
+{
+  "client_id": "https://aurelius.rivenpath.ai/oauth/client-metadata.json",
+  "client_name": "Aurelius",
+  "redirect_uris": [
+    "https://aurelius.rivenpath.ai/oauth/callback",
+    "http://127.0.0.1:8765/callback"
+  ],
+  "grant_types": [
+    "authorization_code",
+    "refresh_token"
+  ],
+  "response_types": [
+    "code"
+  ],
+  "token_endpoint_auth_method": "none"
+}
