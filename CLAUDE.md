@@ -7,7 +7,7 @@ The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (
 
 - `backend/`: the FastAPI service (Python 3.12, uv). All Python code, tests and scripts live here.
 - `mobile/`: the Expo app. **Reserved; do not create it until its phase starts.** Add shared TypeScript packages only when the mobile app needs them.
-- `deploy/`: deployment. `deploy/static/` holds the **only publicly served files** (allowlist enforced by `tests/unit/test_publish_guard.py` and by `pages.yml`). Docker compose and the Caddyfile belong here; the Caddyfile is still at the repo root and moves with compose in M1.
+- `deploy/`: deployment. `deploy/static/` holds the **only publicly served files** (allowlist enforced by `tests/unit/test_publish_guard.py` and by `pages.yml`). Docker compose and the Caddyfile belong here; the Caddyfile is still at the repo root and moves with compose in M1. `deploy/caddy/Dockerfile` is the single, Dependabot-visible pin of the Caddy image.
 - `docs/`: specs (`docs/specs/`, where amendments win), spikes (`docs/spikes/`) and runbooks (`docs/runbooks/`).
 - `.github/workflows/`:
   - `ci.yml`: gitleaks always; ruff, mypy and pytest when `backend/` or shared config changes; never live tests.
@@ -137,7 +137,17 @@ The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (
 - **Supply chain: minimum release age is 14 days, for everything** (Python packages, GitHub Actions, Docker images). Never adopt a version published less than 14 days ago.
   - uv enforces it: `[tool.uv] exclude-newer = "14 days"` in `backend/pyproject.toml`, recorded in `uv.lock` as `exclude-newer-span = "P14D"`.
   - Dependabot (`.github/dependabot.yml`) uses `cooldown: default-days: 14`, runs weekly, and groups minor and patch updates (majors come as their own PRs).
-  - Manual pins (actions, Docker images) follow the same rule: check the release date and pick the newest release at least 14 days old. Pin actions to the full commit SHA with a `# vX.Y.Z` comment, and Docker images by `@sha256:` digest.
+  - Manual pins (actions, Docker images) follow the same rule: check the release date and pick the newest release at least 14 days old. Pin actions to the full commit SHA with a `# vX.Y.Z` comment.
+  - **Container images: pin every reference by its multi-arch INDEX digest** (`name:tag@sha256:<index>`, never a per-platform digest), at least 14 days old, with a comment naming the tag and build date.
+    - Keep the tag in the reference so Dependabot (`docker` ecosystem: `/backend`, `/deploy/caddy`) can update both the tag and the digest.
+    - All architectures in the index must carry the **same** software version. Official images are rebuilt weekly and can briefly mix versions: the 2026-10-26 `python:3.12-slim-bookworm` index had 3.12.16 on amd64 but 3.12.15 on arm64. Check with `docker buildx imagetools inspect`. Older index digests can be found in `docker-library/repo-info` git history.
+    - No `# syntax=` directive in Dockerfiles; it pulls an unpinned frontend image.
+    - Current pins:
+      - `python:3.12-slim-bookworm` (3.12.15, 2026-10-21);
+      - `ghcr.io/astral-sh/uv:0.12.5` (2026-08-14);
+      - `caddy:2.10.2` (2026-02-11), whose only pin is `deploy/caddy/Dockerfile` (the deploy test reads it from there);
+      - `gitleaks:v8.21.2` (2024-10-28) in `.githooks/pre-commit` and `ci.yml`. Dependabot can't see this one; update both places by hand under the same rule.
+    - `tests/unit/test_supply_chain.py` fails on any image reference that isn't digest-pinned (Dockerfiles, workflows, hooks, Python, compose).
   - `tests/unit/test_supply_chain.py` guards the config. Applying the rule on 2026-11-09 moved 14 freshly locked packages back one patch release.
 - Use conventional commits, in small reviewable steps, and commit at every green checkpoint. gitleaks runs in the pre-commit hook. At the end of each milestone, run ruff, mypy and pytest and show the results.
 - **Branch names: lowercase kebab-case, `[a-z0-9-]` only** (e.g. `m1-holiday-calendars`). No slashes, underscores, uppercase or dots. Create and change branches with `git switch` (`git checkout` is denied).

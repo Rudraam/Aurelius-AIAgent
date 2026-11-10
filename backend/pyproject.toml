@@ -54,6 +54,7 @@ ignore = ["S101"]
 "tests/**" = ["S105", "S106"]
 # docker CLI driven with constant args from an absolute path (shutil.which)
 "tests/deploy/**" = ["S105", "S106", "S603"]
+"tests/unit/test_supply_chain.py" = ["S603"]
 "scripts/**" = ["T201", "S105"]
 
 [tool.mypy]

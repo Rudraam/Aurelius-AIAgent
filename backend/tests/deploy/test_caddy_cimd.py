@@ -21,7 +21,19 @@ import httpx2
 import pytest
 
 REPO = Path(__file__).resolve().parents[3]
-CADDY_IMAGE = "caddy:2.10.2"
+CADDY_DOCKERFILE = REPO / "deploy" / "caddy" / "Dockerfile"
+
+
+def caddy_image() -> str:
+    """The digest-pinned Caddy image, from its single (Dependabot-visible) source: deploy/caddy/Dockerfile."""
+    froms = [
+        ln.split()[1] for ln in CADDY_DOCKERFILE.read_text(encoding="utf-8").splitlines() if ln.startswith("FROM ")
+    ]
+    assert len(froms) == 1 and "@sha256:" in froms[0], froms
+    return froms[0]
+
+
+CADDY_IMAGE = caddy_image()
 CLIENT_ID = "https://aurelius.rivenpath.ai/oauth/client-metadata.json"
 DOC = REPO / "deploy" / "static" / "oauth" / "client-metadata.json"
 

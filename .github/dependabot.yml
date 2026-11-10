@@ -22,6 +22,28 @@ updates:
       prefix: ci
       include: scope
 
+  # Docker base images, pinned as name:tag@sha256:<index digest>. Dependabot updates both the tag and the
+  # digest. Image references outside Dockerfiles (the gitleaks image in .githooks/pre-commit and
+  # ci.yml) are not visible to Dependabot; they are refreshed by hand under the same 14-day rule.
+  - package-ecosystem: docker
+    directories:
+      - /backend
+      - /deploy/caddy
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Toronto
+    cooldown:
+      default-days: 14
+    groups:
+      docker-minor-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
+    commit-message:
+      prefix: build
+      include: scope
+
   - package-ecosystem: uv
     directory: /backend
     schedule:
