@@ -11,7 +11,8 @@
 | 0.3 Choose strategy | ✅ Provisional | Both CIMD and DCR are advertised. See §3. |
 | 0.4 Lifecycle | ⏸ Code ready, tested against fakes | `uv run aurelius auth login`, then `scripts/spike_auth_lifecycle.py`. It needs one browser login. |
 | SDK API check | ✅ Done | `mcp==2.3.0` source read. It has four gaps that matter for us (§4). |
-| Decision 4: are order tools visible under a read-only token? | ⏸ Waiting on Rudra | `spike_auth_lifecycle.py fixtures` records the `order_tools_under_read_scope` observation from `tools/list` alone. It calls no preview or create tool. |
+| 0.1 / Decision 4 (2026-11-10) | ✅ Partly, via Claude Code | 5 read calls in Rudra's Claude Code session: market data observed; `list_accounts` says "no active account". All 11 listed write tools are visible. See `questrade-tools.md`. |
+| Decision 4: are order tools visible under a read-only token? (original plan) | ⏸ Waiting on Rudra | `spike_auth_lifecycle.py fixtures` records the `order_tools_under_read_scope` observation from `tools/list` alone. It calls no preview or create tool. |
 
 **Decisions (2026-11-09, round 1):**
 1. CIMD first, served as a static file, with a permanent client_id URL. DCR is a fallback, allowed because `registration_endpoint` is published.
