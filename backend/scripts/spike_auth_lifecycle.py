@@ -2,7 +2,8 @@
 
 READ-ONLY. ``call_read_tool`` refuses anything outside READ_TOOLS before a request is built. The
 script never calls preview_* or create_* tools; it only reports whether they appear in tools/list.
-Tokens are never printed. Observations go to backend/.spike/observations.jsonl.
+Tokens are never printed. Observations go to backend/.spike/observations.jsonl and fixtures to
+backend/.spike/fixtures/ (both git-ignored).
 
 Run from D:\\Aurelius\\backend (PowerShell), after `uv run aurelius auth login`:
     uv run python scripts/spike_auth_lifecycle.py call            # new process, headless list_accounts
@@ -18,10 +19,8 @@ import argparse
 import asyncio
 import base64
 import json
-import re
 import secrets
 import time
-import uuid
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -32,10 +31,11 @@ from mcp.client import Client
 from app.cli import mcp_url, open_store
 from app.integrations.questrade.auth import TokenManager, discover
 from app.integrations.questrade.transport import read_session
+from app.redaction import GUID_RE, Redactor
 
 BACKEND = Path(__file__).resolve().parents[1]
 OBS_FILE = BACKEND / ".spike" / "observations.jsonl"
-FIXTURES = BACKEND / "tests" / "fixtures" / "questrade"
+FIXTURES = BACKEND / ".spike" / "fixtures" / "questrade"  # git-ignored; promote by hand after review
 
 READ_TOOLS = frozenset(
     {
@@ -230,37 +230,9 @@ async def cmd_probe(stale: bool) -> None:
 
 # --------------------------------------------------------------------------- fixtures + redaction
 
-_GUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
-_NS = uuid.UUID("6f1d1a52-6a59-4b39-9d0f-a0a1e1a5e000")
-_PII_KEYS = re.compile(r"(name|email|address|phone|sin$|birth|owner|holder|beneficiar)", re.I)
-_SAFE_KEYS = re.compile(
-    r"^(symbol\w*|description|security\w*|instrument\w*|exchange|currency|\w*type|status|side)$", re.I
-)
-_NUMBER_KEYS = re.compile(r"(accountnumber|number|acctnum)", re.I)
-_MONEY_KEYS = re.compile(r"(balance|cash|value|equity|power|pnl|amount|cost|commission|total|margin)", re.I)
-
-
-def redact(obj: Any, key: str = "") -> Any:
-    if isinstance(obj, dict):
-        return {k: redact(v, k) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [redact(v, key) for v in obj]
-    if isinstance(obj, str):
-        s = _GUID.sub(lambda m: str(uuid.uuid5(_NS, m.group(0).lower())), obj)
-        if _NUMBER_KEYS.search(key) and not _GUID.fullmatch(s):
-            return "****" + s[-4:] if len(s) > 4 else "****"
-        if _PII_KEYS.search(key) and not _SAFE_KEYS.match(key):
-            return "REDACTED"
-        if re.fullmatch(r"\d{7,}", s):
-            return "****" + s[-4:]
-        return s
-    if isinstance(obj, bool) or obj is None:
-        return obj
-    if isinstance(obj, int | float) and _MONEY_KEYS.search(key) and "price" not in key.lower():
-        return round(obj, -1)
-    if isinstance(obj, int) and _NUMBER_KEYS.search(key):
-        return int(str(obj)[-4:])
-    return obj
+# One Redactor per run: the same real GUID maps to the same fake GUID across all saved files.
+_REDACTOR = Redactor()
+redact = _REDACTOR.redact
 
 
 def fill_args(schema: dict[str, Any], account_id: str | None) -> dict[str, Any]:
@@ -290,7 +262,7 @@ async def cmd_fixtures() -> None:
         FIXTURES.mkdir(parents=True, exist_ok=True)
         tools = await client.list_tools()
         catalog = [t.model_dump(mode="json", by_alias=True, exclude_none=True) for t in tools.tools]
-        (FIXTURES / "_tools_list.json").write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
+        (FIXTURES / "_tools_list.json").write_text(json.dumps(redact(catalog), indent=2) + "\n", encoding="utf-8")
         names = {t["name"] for t in catalog}
         observe(
             "tools_list",
@@ -310,7 +282,7 @@ async def cmd_fixtures() -> None:
 
         accts = payload_of(await call_read_tool(client, "list_accounts"))
         (FIXTURES / "list_accounts.json").write_text(json.dumps(redact(accts), indent=2) + "\n", encoding="utf-8")
-        guids = sorted(set(_GUID.findall(json.dumps(accts))))
+        guids = sorted(set(GUID_RE.findall(json.dumps(accts))))  # real IDs: used for calls, never saved
         account_id = guids[0] if guids else None
         by_name = {t["name"]: t for t in catalog}
         for tool in ("get_balances", "get_positions", "get_order_history", "get_account_activities", "get_quotes"):
@@ -326,7 +298,10 @@ async def cmd_fixtures() -> None:
             out = {"_args_redacted": redact(args), "_is_error": res.is_error, "result": redact(payload_of(res))}
             (FIXTURES / f"{tool}.json").write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
             print(f"  saved {tool}.json")
-        print(f"\nBefore anything is committed, read through {FIXTURES} for personal data.")
+        print(
+            f"\nSaved to {FIXTURES} (git-ignored). To promote one into backend/tests/fixtures/questrade/,"
+            "\nread it by eye, copy it over, then run: uv run pytest tests/unit/test_fixture_guard.py"
+        )
 
     await with_client(run)
 

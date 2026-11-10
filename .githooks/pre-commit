@@ -1,0 +1,28 @@
+#!/bin/sh
+# Aurelius pre-commit: gitleaks over the staged changes. The repo is PUBLIC, so this fails closed:
+# if gitleaks can run neither natively nor through Docker, the commit is blocked.
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+# Never bypass with --no-verify.
+set -eu
+
+IMAGE="ghcr.io/gitleaks/gitleaks:v8.21.2@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46"
+ARGS="git --pre-commit --staged --redact --no-banner -v"
+
+if command -v gitleaks >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    exec gitleaks $ARGS .
+fi
+
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    root=$(git rev-parse --show-toplevel)
+    if command -v cygpath >/dev/null 2>&1; then
+        root=$(cygpath -m "$root")  # Git for Windows: D:/Aurelius, which Docker Desktop understands
+    fi
+    MSYS_NO_PATHCONV=1 exec docker run --rm -v "$root:/repo:ro" --entrypoint sh "$IMAGE" -c \
+        "git config --global --add safe.directory /repo && cd /repo && gitleaks $ARGS ."
+fi
+
+echo "pre-commit: BLOCKED. gitleaks is unavailable (no gitleaks binary and Docker is not running)." >&2
+echo "Start Docker Desktop or install gitleaks v8.21.2, then commit again. Do not use --no-verify." >&2
+exit 1

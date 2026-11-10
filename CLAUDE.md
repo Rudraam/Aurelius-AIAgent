@@ -3,6 +3,21 @@
 Single-user personal finance agent for Rudra (Ontario). Phase 1 is the Questrade MCP brokerage layer.
 The full spec is in `AURELIUS_PHASE1.md`. Spike findings are in `docs/spikes/` and runbooks in `docs/runbooks/`. This code touches a real brokerage account.
 
+## The repository is PUBLIC (github.com/Rudraam/Aurelius-AIAgent)
+
+- **Real account data never enters git.** That means no account IDs or numbers, balances, positions, activities, order history, names or emails from the live account, in any file, commit message or test.
+- **Live observations stay in `backend/.spike/`, which is git-ignored.** That covers `observations.jsonl`, the encrypted auth state, and live fixtures (`backend/.spike/fixtures/`). Never move or copy them anywhere tracked unless the next point is followed.
+- **Promoting a fixture into `backend/tests/fixtures/` is a deliberate step:**
+  1. redact it with `app/redaction.Redactor`, which maps every GUID onto the fixed `FAKE_GUIDS` set and masks account numbers to `****1234`;
+  2. read it by eye;
+  3. make sure `tests/unit/test_fixture_guard.py` passes.
+
+  The guard fails on any GUID outside `FAKE_GUIDS`, any standalone 7-10 digit run, any unmasked account-number field, or any email address.
+- **gitleaks runs as a pre-commit hook** (`.githooks/pre-commit`, pinned image `gitleaks:v8.21.2@sha256:0e99e88…`). It fails closed: if neither a `gitleaks` binary nor Docker is available, the commit is blocked.
+  - Enable it once per clone with `git config core.hooksPath .githooks`.
+  - Never use `--no-verify`.
+- GitHub secret scanning and push protection are enabled on the repo (by Rudra).
+
 ## Non-negotiable invariants (never weaken one to make a test pass; stop and explain instead)
 
 1. **No autonomous orders.** Every create needs explicit confirmation in Aurelius **and** push approval in the Questrade app.
@@ -97,7 +112,8 @@ The full spec is in `AURELIUS_PHASE1.md`. Spike findings are in `docs/spikes/` a
   - `uv run pytest`
 - Docker: `docker build -t aurelius-api:dev backend/`. Check arm64 with `docker buildx build --platform linux/arm64 --load …`.
 - Ask before adding a dependency that isn't in the spec stack. Approved additions: `httpx2` (it replaces httpx), `tzdata`, and Authlib (approved but unused). APScheduler is in the spec stack.
-- Use conventional commits, in small reviewable steps. Run gitleaks before committing. At the end of each milestone, run ruff, mypy and pytest and show the results.
+- Use conventional commits, in small reviewable steps, and commit at every green checkpoint. gitleaks runs in the pre-commit hook. At the end of each milestone, run ruff, mypy and pytest and show the results.
+- **Branch names: lowercase kebab-case, `[a-z0-9-]` only** (e.g. `m1-holiday-calendars`). No slashes, underscores, uppercase or dots. Create and change branches with `git switch` (`git checkout` is denied).
 - When the docs and the server disagree, trust the server and record the difference in `docs/spikes/`.
 
 ## Planned for M1 (decided, not yet built)
