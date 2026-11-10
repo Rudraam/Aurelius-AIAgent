@@ -182,7 +182,7 @@ def _raw() -> dict:
         lambda r: r["exchanges"]["XTSE"]["closed_weekdays"].append("2026-12-24"),  # also a special session
         lambda r: r["exchanges"]["XNYS"]["special_sessions"].update(
             {"2026-11-30": {"open": "13:00", "close": "09:30"}}
-        ),  # noqa: E501
+        ),
         lambda r: r["exchanges"].pop("XNYS"),
     ],
 )
