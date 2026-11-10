@@ -41,7 +41,9 @@ The full spec is in `AURELIUS_PHASE1.md`. Spike findings are in `docs/spikes/` a
 9. **Money and time.** Money is `Decimal` / `NUMERIC(18,4)`, never float. Store timestamps in UTC and display them in America/Toronto. Keep CAD and USD separate.
    - **Never use a fixed UTC offset for Toronto** (no `timezone(timedelta(hours=-5))`, no `"-05:00"`, no `US/Eastern`).
    - All Toronto logic goes through `app/domain/market_time.TORONTO`, which is IANA `America/Toronto` from the `tzdata` package. It is the only `ZoneInfo(...)` call in `app/`; `tests/unit/test_no_fixed_offsets.py` enforces this.
-   - Time rules compare Toronto **wall-clock** time. On fall back, a repeated time counts on both passes, so 01:55-01:59 EDT is blocked too (fail-closed). On spring forward, the maintenance window runs from 01:55 EST straight through to 03:50 EDT with no gap.
+   - Time rules compare Toronto **wall-clock** time. On spring forward, the maintenance window runs from 01:55 EST straight through to 03:50 EDT with no gap.
+   - **Intentional double-block on fall back (approved 2026-11-09):** the repeated hour counts on both passes. So the window blocks 01:55-01:59 EDT (first pass), allows 01:00-01:54 EST, then blocks 01:55-03:50 EST: 120 real minutes instead of 115. This is deliberate and fail-closed. Do not "fix" it to a single pass.
+   - **Exchange holidays and early closes are not modelled yet.** `is_regular_session` knows weekdays only. A holiday calendar is a hard prerequisite for ever enabling trading (M1, see "Planned for M1" below).
    - `tests/unit/test_dst.py` covers 2026-11-01 and 2027-03-14 for the maintenance window, market hours, order timing and the APScheduler 16:30 trigger.
 
 ## Auth design (decisions of 2026-11-09)
@@ -97,3 +99,11 @@ The full spec is in `AURELIUS_PHASE1.md`. Spike findings are in `docs/spikes/` a
 - Ask before adding a dependency that isn't in the spec stack. Approved additions: `httpx2` (it replaces httpx), `tzdata`, and Authlib (approved but unused). APScheduler is in the spec stack.
 - Use conventional commits, in small reviewable steps. Run gitleaks before committing. At the end of each milestone, run ruff, mypy and pytest and show the results.
 - When the docs and the server disagree, trust the server and record the difference in `docs/spikes/`.
+
+## Planned for M1 (decided, not yet built)
+
+- **Exchange holiday calendars: a hard prerequisite for ever setting `AURELIUS_TRADING_ENABLED=true`.**
+  - Calendars are per exchange: XTSE for `.TO` symbols and XNYS for US symbols, including early closes.
+  - `exchange_calendars` is a **dev-only** dependency. A script uses it to generate a committed holiday/session file; the runtime reads only that file, so pandas never ships in the image.
+  - **Fail closed:** market orders are blocked for any date beyond the file's coverage.
+  - A test fails once fewer than 90 days of coverage remain, forcing a regeneration.
