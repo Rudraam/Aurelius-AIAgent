@@ -35,6 +35,7 @@ from app.ledger.policy import (
     GoalsPolicy,
     InvestingPolicy,
     PercentCap,
+    SurplusPolicy,
     cap_amount,
 )
 from app.ledger.snapshot import load_snapshot, plan_bytes, snapshot
@@ -156,6 +157,7 @@ def ledger(draw: st.DrawFn) -> tuple[LedgerInputs, AllocationPolicy]:
         goals=GoalsPolicy(undated_per_pay=draw(cents), overdue_per_pay_cap=draw(st.none() | caps())),
         investing=draw(st.none() | st.builds(InvestingPolicy, per_pay_limit=caps(), targets=st.just(tuple(targets)))),
         explore=draw(st.none() | st.builds(ExplorePolicy, percent=percent, account_id=st.just("nonreg"))),
+        surplus=draw(st.none() | st.builds(SurplusPolicy, spending_cap=caps(), redirect_to=st.just("nonreg"))),
     )
     return inputs, policy
 
@@ -252,7 +254,7 @@ def percent_caps(policy: AllocationPolicy) -> int:
 def test_more_pay_never_reduces_any_bucket_beyond_rounding(
     case: tuple[LedgerInputs, AllocationPolicy], extra: Decimal
 ) -> None:
-    """Priority monotonicity, up to one cent per percentage cap (pending Rudra's decision, see below)."""
+    """P17: when pay grows, no allocation drops by more than one cent per percentage cap in the policy."""
     inputs, policy = case
     richer = inputs.model_copy(update={"net_pay": inputs.net_pay + extra})
     before = {line.line_id: line.amount for line in allocate(inputs, policy).lines}
@@ -263,11 +265,13 @@ def test_more_pay_never_reduces_any_bucket_beyond_rounding(
     assert not shrunk, shrunk
 
 
-@pytest.mark.xfail(strict=True, reason="OPEN DECISION: independent round-down of two percentage caps")
+@pytest.mark.xfail(
+    strict=True, reason="P17: strict monotonicity is impossible with independently rounded percentage caps"
+)
 def test_strict_monotonicity_counterexample() -> None:
     """Net 0.09 -> 0.10 with a 10% emergency-fund cap and a 20% explore cap: both round up a cent at
     once, so investing (below them) drops 0.08 -> 0.07. Strict "more pay never reduces" can't hold
-    while percentage caps round down independently. Kept as a strict xfail until Rudra decides."""
+    while percentage caps round down independently (decision P17). Kept as a strict xfail."""
     from app.ledger.policy import MiddleBucket
     from tests.unit.ledger.factories import account, standard_accounts, standard_inputs, standard_policy
 
@@ -311,7 +315,7 @@ def test_recomputing_from_the_snapshot_reproduces_the_plan(case: tuple[LedgerInp
 def test_revisions_conserve_or_are_rejected(case: tuple[LedgerInputs, AllocationPolicy], data: st.DataObject) -> None:
     inputs, policy = case
     plan = allocate(inputs, policy)
-    editable = [line.line_id for line in plan.lines if line.line_id != "spending"]
+    editable = [line.line_id for line in plan.lines if line.bucket not in (Bucket.SPENDING, Bucket.SURPLUS)]
     if not editable:
         return
     chosen = data.draw(st.lists(st.sampled_from(editable), min_size=1, max_size=3, unique=True))
@@ -325,3 +329,70 @@ def test_revisions_conserve_or_are_rejected(case: tuple[LedgerInputs, Allocation
     assert revised.total() == inputs.net_pay
     for kind, total in registered_totals(revised, inputs).items():
         assert total <= allowed_room(inputs, kind)
+
+
+@PROFILE
+@given(ledger(), st.data())
+def test_spending_never_exceeds_an_active_cap(case: tuple[LedgerInputs, AllocationPolicy], data: st.DataObject) -> None:
+    """P19: with a spending cap, spending <= cap and every leftover cent goes to the redirect account,
+    also after a revision."""
+    inputs, policy = case
+    if policy.surplus is None:
+        return
+    cap = cap_amount(policy.surplus.spending_cap, inputs.net_pay)
+    plan = allocate(inputs, policy)
+    assert plan.line("spending").amount <= cap
+    if plan.line("spending").amount < cap:
+        assert plan.line("surplus:nonreg").amount == 0  # surplus only gets money once spending is full
+    editable = [line.line_id for line in plan.lines if line.bucket not in (Bucket.SPENDING, Bucket.SURPLUS)]
+    if not editable:
+        return
+    chosen = data.draw(st.lists(st.sampled_from(editable), min_size=1, max_size=3, unique=True))
+    try:
+        revised = revise(plan, inputs, policy, {line_id: data.draw(cents) for line_id in chosen})
+    except (ConservationError, RoomExceeded):
+        return
+    assert revised.line("spending").amount <= cap
+    assert revised.total() == inputs.net_pay
+
+
+@PROFILE
+@given(caps(), cents, st.integers(min_value=1, max_value=200_000).map(lambda c: Decimal(c).scaleb(-2)))
+def test_every_cap_amount_is_non_decreasing_in_net_pay(
+    cap: FixedCap | PercentCap, net: Decimal, extra: Decimal
+) -> None:
+    """P17: the caps themselves never shrink when pay grows (allocations may, by the P17 bound)."""
+    assert cap_amount(cap, net + extra) >= cap_amount(cap, net)
+
+
+def test_a_percentage_capped_bucket_can_itself_drop_one_cent_within_the_bound() -> None:
+    """P17: investing has its own 80% cap but is limited by what two percentage caps above it leave.
+    0.19 -> 0.20 moves it 0.15 -> 0.14: within the bound (3 percentage caps -> up to 0.03)."""
+    from app.ledger.policy import MiddleBucket
+    from tests.unit.ledger.factories import account, standard_accounts, standard_inputs, standard_policy
+
+    policy = standard_policy(
+        order=(
+            MiddleBucket.EMERGENCY_FUND,
+            MiddleBucket.EXPLORE,
+            MiddleBucket.INVESTING,
+            MiddleBucket.BUFFER,
+            MiddleBucket.GOALS,
+        ),
+        buffer=None,
+        goals=GoalsPolicy(),
+        emergency_fund=EmergencyFundPolicy(
+            months=Decimal(1), per_pay_cap=PercentCap(kind="percent", percent=Decimal(10))
+        ),
+        explore=ExplorePolicy(percent=Decimal(20), account_id="explore"),
+        investing=InvestingPolicy(per_pay_limit=PercentCap(kind="percent", percent=Decimal(80)), targets=("nonreg",)),
+    )
+    accounts = tuple(
+        a if a.id != "hisa" else account("hisa", AccountKind.HISA, "-9999.00", "emergency_fund")
+        for a in standard_accounts()
+    )
+    base = standard_inputs(bills=(), budget_lines=(), goals=(), accounts=accounts)
+    low = allocate(base.model_copy(update={"net_pay": Decimal("0.19")}), policy).line("investing:nonreg").amount
+    high = allocate(base.model_copy(update={"net_pay": Decimal("0.20")}), policy).line("investing:nonreg").amount
+    assert (low, high) == (Decimal("0.15"), Decimal("0.14"))
+    assert low - high <= Decimal(percent_caps(policy)).scaleb(-2)

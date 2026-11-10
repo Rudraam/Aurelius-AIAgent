@@ -426,6 +426,34 @@ class _Allocator:
         self._give(SPENDING_LINE_ID, Bucket.SPENDING, None, min(cap, self.remaining), "spending_remainder", cap=cap)
         self._give(f"surplus:{account.id}", Bucket.SURPLUS, account, self.remaining, "surplus_redirect")
 
+    def order_warnings(self) -> None:
+        """P18 (non-blocking): investing or explore ordered ahead of an emergency fund below target."""
+        ef = self.policy.emergency_fund
+        if ef is None:
+            return
+        order = self.policy.order
+        ahead = [
+            bucket
+            for bucket in order[: order.index(MiddleBucket.EMERGENCY_FUND)]
+            if (bucket is MiddleBucket.INVESTING and self.policy.investing is not None)
+            or (bucket is MiddleBucket.EXPLORE and self.policy.explore is not None)
+        ]
+        if not ahead:
+            return
+        account = self._role_account("emergency_fund")
+        if account is None:
+            return
+        target = floor_cents(multiply(ef.months, monthly_essentials(self.inputs)))
+        if account.projected_balance >= target:
+            return
+        for bucket in ahead:
+            self._notice(
+                "ordered_ahead_of_underfunded_emergency_fund",
+                bucket=bucket.value,
+                emergency_fund_target=target,
+                projected_balance=account.projected_balance,
+            )
+
     # -- run --------------------------------------------------------------------------------------
 
     def run(self) -> Plan:
@@ -439,6 +467,7 @@ class _Allocator:
             )
         self.bills()
         self.essentials()
+        self.order_warnings()
         middle = {
             MiddleBucket.BUFFER: self.buffer,
             MiddleBucket.EMERGENCY_FUND: self.emergency_fund,
@@ -475,16 +504,21 @@ def allocate(inputs: LedgerInputs, policy: AllocationPolicy) -> Plan:
 
 
 def revise(plan: Plan, inputs: LedgerInputs, policy: AllocationPolicy, overrides: Mapping[str, Decimal]) -> Plan:
-    """Apply line overrides and rebalance only the spending line.
+    """Apply line overrides and rebalance only the balancing line(s).
 
-    Rejected with a typed error if the plan doesn't match these inputs, a line is unknown, the spending
-    line itself is overridden, an amount isn't whole non-negative cents, spending would go negative
+    The balancing line is spending. With an active spending cap (P19) it is spending up to the cap,
+    then the surplus line for everything left, so spending never exceeds its cap after a revision either.
+
+    Rejected with a typed error if the plan doesn't match these inputs, a line is unknown, a balancing
+    line is overridden, an amount isn't whole non-negative cents, the overrides exceed net pay
     (``ConservationError``), or a registered account type would exceed its room (``RoomExceeded``).
     """
     if plan.inputs_hash != snapshot_hash(inputs, policy):
         raise RevisionError("plan was not computed from these inputs and policy")
-    if SPENDING_LINE_ID in overrides:
-        raise RevisionError("the spending line is the balancing line and can't be overridden")
+    balancing = {SPENDING_LINE_ID} | {line.line_id for line in plan.lines if line.bucket is Bucket.SURPLUS}
+    touched = sorted(balancing & set(overrides))
+    if touched:
+        raise RevisionError(f"balancing lines can't be overridden: {touched}")
     known = {line.line_id for line in plan.lines}
     unknown = sorted(set(overrides) - known)
     if unknown:
@@ -515,13 +549,21 @@ def revise(plan: Plan, inputs: LedgerInputs, policy: AllocationPolicy, overrides
                 )
             else:
                 lines.append(line)
-        others = sum((line.amount for line in lines if line.line_id != SPENDING_LINE_ID), ZERO)
-        spending = plan.net_pay - others
-        if spending < 0:
-            raise ConservationError(f"overrides exceed net pay by {-spending}")
-        lines = [
-            line.model_copy(update={"amount": spending}) if line.line_id == SPENDING_LINE_ID else line for line in lines
-        ]
+        others = sum((line.amount for line in lines if line.line_id not in balancing), ZERO)
+        left = plan.net_pay - others
+        if left < 0:
+            raise ConservationError(f"overrides exceed net pay by {-left}")
+        spending = left
+        if policy.surplus is not None:
+            spending = min(left, cap_amount(policy.surplus.spending_cap, plan.net_pay))
+        rebalanced: list[Line] = []
+        for line in lines:
+            if line.line_id == SPENDING_LINE_ID:
+                line = line.model_copy(update={"amount": spending})
+            elif line.bucket is Bucket.SURPLUS:
+                line = line.model_copy(update={"amount": left - spending})
+            rebalanced.append(line)
+        lines = rebalanced
 
         accounts = {a.id: a for a in inputs.accounts}
         for kind in sorted(REGISTERED):

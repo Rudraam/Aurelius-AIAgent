@@ -195,3 +195,35 @@ def test_reconciliation_drift_after_an_unexecuted_transfer() -> None:
     later = [*approved, Flow(account_id="hisa", on=date(2027, 1, 22), amount=D("50.00"))]
     assert project_balance("hisa", entry, later) == D("1050.00")
     check_golden("reconciliation_drift", drift.model_dump_json().encode())
+
+
+def test_investing_ahead_of_an_underfunded_emergency_fund_gets_a_notice() -> None:
+    """P18: non-blocking. The plan is still computed in the policy's order."""
+    from app.ledger.policy import MiddleBucket
+
+    order = (
+        MiddleBucket.INVESTING,
+        MiddleBucket.EXPLORE,
+        MiddleBucket.EMERGENCY_FUND,
+        MiddleBucket.BUFFER,
+        MiddleBucket.GOALS,
+    )
+    plan = allocate(standard_inputs(), standard_policy(order=order))
+    check_golden("order_warning", plan_bytes(plan))
+    flagged = sorted(
+        dict(n.params)["bucket"] for n in plan.notices if n.code == "ordered_ahead_of_underfunded_emergency_fund"
+    )
+    assert flagged == ["explore", "investing"]
+    assert plan.status is PlanStatus.OK
+    # Default order, or an emergency fund at target: no notice.
+    assert "ordered_ahead_of_underfunded_emergency_fund" not in notice_codes(
+        allocate(standard_inputs(), standard_policy())
+    )
+    from tests.unit.ledger.factories import account, standard_accounts
+
+    funded = tuple(
+        a if a.id != "hisa" else account("hisa", AccountKind.HISA, "99999.00", "emergency_fund")
+        for a in standard_accounts()
+    )
+    plan = allocate(standard_inputs(accounts=funded), standard_policy(order=order))
+    assert "ordered_ahead_of_underfunded_emergency_fund" not in notice_codes(plan)
