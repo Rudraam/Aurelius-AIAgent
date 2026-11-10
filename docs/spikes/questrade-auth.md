@@ -54,7 +54,14 @@ See `CLAUDE.md`.
 | `revocation_endpoint` | present. Its auth methods do **not** include `none`, so a public client may not be able to revoke its own refresh token. To be tested. |
 | `dpop_signing_alg_values_supported` | present. DPoP is optional; we do not need it for Phase 1. |
 
-## 3. Auth strategy (provisional)
+## 3. Auth strategy
+
+> **Finding of 2026-11-09: DCR is ruled out.** A real `auth login --strategy dcr` got back the `client_id` **`claude-code-public`** from `https://mcp.questrade.com/connect/register`. That is Claude Code's pre-registered public client, not a client issued to Aurelius.
+> - Questrade's DCR endpoint is a compatibility shim that returns fixed client IDs. This matches the technical reference, which lists no client that uses DCR: everything else signs in with CIMD or a pre-registered client.
+> - The authorize request then hit Questrade's generic error page, because `claude-code-public` is not registered with Aurelius's redirect URI.
+> - Aurelius must **never** operate under another application's `client_id`, so DCR is not a usable fallback, even if a redirect URI could be made to match.
+> - The planned paired probe (our `client_id` vs a bogus one) was skipped: it would have sent requests under Claude Code's identity, and no result could change the decision.
+> - **Strategy: CIMD only.** The interim host is GitHub Pages (`Rudraam/aurelius-oauth`) on `aurelius.rivenpath.ai`; it moves to the VM's Caddy later at the same, permanent URL.
 
 **Recommendation: CIMD for production, with DCR as the fallback. Use DCR first to prove the lifecycle quickly, because it needs no domain.**
 
