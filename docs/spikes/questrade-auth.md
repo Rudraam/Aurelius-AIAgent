@@ -192,6 +192,8 @@ I mutation-checked the two key tests. Removing the single-flight re-check made 2
 
 ## 8. Proposed Phase 1 milestones (after this spike is approved)
 
+> **Superseded on 2026-11-10** by the revised milestone plan in `docs/specs/phase1-questrade.md`, under Amendments A13–A15. The list below is kept for history.
+
 1. **M1: Skeleton + secure auth.** uv project, config, AES-GCM, Postgres `oauth_client`/`oauth_token` with an optimistic lock, hand-rolled `aurelius auth login` (CIMD or DCR), headless SDK provider with the gap fixes, `/health`, `/health/questrade`, `/oauth/*`, Alembic, docker compose (arm64 + amd64), Caddy.
 2. **M2: MCP client core.** `call_tool` wrapper, allowlist + `ToolNotAllowed`, token-bucket limiter, error mapping, audit `mcp_call` table, correlation IDs, catalog snapshots + drift, a fake `MCPServer` with scripted failure modes.
 3. **M3: Read sync.** Typed adapters + `Money`, the snapshot tables, an idempotent activity ledger, the scheduler, and the `/accounts`, `/portfolio`, `/sync` and `/market/quotes` endpoints.

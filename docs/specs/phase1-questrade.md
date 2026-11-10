@@ -20,6 +20,25 @@ introduced it.
 | A10 | **The repository is public.** Real account data never enters git. Live observations and fixtures stay in git-ignored `backend/.spike/`; fixtures are promoted only after redaction (fixed fake GUIDs, masked account numbers) and the fixture guard test. gitleaks runs as a fail-closed pre-commit hook and in CI. | §0.1 "Save redacted responses to `backend/tests/fixtures/questrade/`" | `a4a11b8`, `b40da52` |
 | A11 | **Monorepo layout:** `backend/`, `mobile/` (reserved), `deploy/` (`static/` is the only publicly served tree; compose and the Caddyfile move here in M1), `docs/`, `.github/workflows/` (CI and Pages). | §7 repository layout | `084c1a1` |
 | A12 | **Test tooling:** the fake server uses `mcp.server.mcpserver.MCPServer` (mcp 2.x renamed `FastMCP`). | §6 "fake Questrade MCP server built with the SDK's FastMCP", §15 | `1f7eec1` |
+| A13 | **For now, the backend is not an MCP client.** Questrade refused Aurelius's CIMD client, while Claude Code's `/mcp` login to the same server succeeded: Questrade uses a client allowlist. The CIMD code, document and `client_id` invariant stay **dormant but intact**, pending a Questrade allowlist request. Nothing is deleted, and no other client's identity is ever used. In Claude Code, every mutating Questrade tool is denied by exact name (`tests/unit/test_questrade_mcp_denies.py`). | §0.3, §5 (backend as MCP client), §13 jobs over MCP | `3b13a0d`, `7fda148` |
+| A14 | **Reads and sync use Questrade's official REST API**, pending its spike (M2). This starts only after Rudra resolves the "no active account" response from `list_accounts`. The token store, single-flight rotation and encryption carry over; the CIMD `client_id` invariant applies to MCP auth only. Response numbers are parsed straight into `Decimal` (`app/integrations/json_decimal.loads`), and floats never reach domain code. | §5 sync via MCP read tools, §8 tables (source of data) | pending (M2) |
+| A15 | **Orders are handed off through a supported client (Claude) and approved in the Questrade app.** Aurelius never submits. For each intent, Aurelius runs every guardrail on a fresh quote (refused when the quote is delayed or the market is closed) and freezes an **order plan**. The plan contains: the exact arguments and their `order_args_hash`, a 5-minute validity, a **one-line human summary** (e.g. `BUY 3 XEQT.TO LIMIT 34.10 Day TFSA ****1234`), and the **exact instruction text for Claude** (every argument, plus "change nothing"). **Limit orders only** in this flow, because of the delay between plan and approval. **The binding check is Rudra's comparison of the Questrade push approval against the plan's summary.** Afterwards, Aurelius reconciles via `list_instructions` and order history and flags any mismatch. It still never retries; a re-send is Rudra's call. This replaces the server-preview binding, since `preview_order_instruction` is not listed (33 of 34 tools). Accounts held as AuthorizedTrader and QWP/managed accounts are excluded. M4 also evaluates Questrade Flows (MONTHLY schedule, `dollarValue` sizing, manual approval) for recurring payday buys, with Aurelius only auditing the results. | §4 invariant 4 (preview binding), §10 state machine (preview/create steps), §9 market orders | pending (M4) |
+
+### Milestone plan (revised 2026-11-10; supersedes `docs/spikes/questrade-auth.md` §8)
+
+1. **M1: Foundations that don't need Questrade.**
+   - Exchange calendars (A9): XTSE and XNYS, with early closes, mapped from `listingMarket`. Generated into a committed file, fail-closed beyond coverage, with a test that fails 90 days before coverage ends.
+   - A field-aware `Redactor` and fixture guard.
+   - The float-to-`Decimal` JSON helper.
+   - Amendments A13–A15.
+2. **M2: REST API spike** (Rudra runs it, read-only). It waits until the "no active account" issue is resolved.
+3. **M3: Read sync over REST.**
+   - Typed adapters and `Money`.
+   - Snapshot tables, plus `product_type`, `support_trading` and `role_type`.
+   - The activity ledger.
+   - The 16:30 Toronto job and the read endpoints.
+4. **M4: Order plans and handoff (A15)**, plus the Flows evaluation for recurring buys.
+5. **M5: Hardening and the agent interface.**
 
 ---
 

@@ -1,0 +1,52 @@
+{
+  "_source": "Questrade MCP via Claude Code, 2026-11-10, public market data; GUIDs redacted",
+  "tool": "get_quotes",
+  "args": {
+    "symbols": [
+      "SHOP.TO"
+    ]
+  },
+  "response": {
+    "quotes": [
+      {
+        "securityUuid": "00000000-0000-4000-8000-000000000002",
+        "symbol": "SHOP.TO",
+        "currency": "CAD",
+        "bidPrice": 214.1,
+        "bidSize": 1,
+        "askPrice": 215.11,
+        "askSize": 1,
+        "lastPrice": 214.86,
+        "quoteTime": "2026-11-09T21:12:16Z",
+        "lastTradeTime": "2026-11-09T21:00:00Z",
+        "lastTradeSize": 900,
+        "tick": "Up",
+        "volume": 2397185,
+        "openPrice": 213.38,
+        "highPrice": 215.35,
+        "lowPrice": 209,
+        "highPrice52Weeks": 255.95,
+        "lowPrice52Weeks": 129.01,
+        "volumeWeightedAveragePrice": 214.314774,
+        "priceChangeAmount": 4.39,
+        "priceChangePercent": 0.020858,
+        "afterHourPriceChangeAmount": 0,
+        "afterHourPriceChangePercent": 0,
+        "isTradingHour": false,
+        "marketSector": "tsx",
+        "snapDateTime": "2026-11-10T05:20:08Z",
+        "delay": false,
+        "marketState": "Closed",
+        "peRatio": 87.11255,
+        "dividendYield": 0,
+        "eps": 2.31,
+        "sharesOutstanding": 1208456928,
+        "averageVolume20Days": 1861365,
+        "averageVolume3Months": 1955106,
+        "lastDividendAmount": 0,
+        "lastExDividendDate": null,
+        "lastDividendPayDate": null
+      }
+    ]
+  }
+}

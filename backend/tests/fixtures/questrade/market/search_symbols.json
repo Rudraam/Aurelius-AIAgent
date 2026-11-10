@@ -1,0 +1,67 @@
+{
+  "_source": "Questrade MCP via Claude Code, 2026-11-10, public market data; GUIDs redacted",
+  "tool": "search_symbols",
+  "args": {
+    "query": "SHOP",
+    "limit": 5
+  },
+  "response": {
+    "results": [
+      {
+        "securityUuid": "00000000-0000-4000-8000-000000000001",
+        "symbol": "SHOP",
+        "description": "SHOPIFY INC",
+        "listingMarket": "NASDAQ",
+        "marketCapitalization": 173715683400,
+        "sector": "Technology",
+        "industryGroup": "Software",
+        "isOvernightTradingEligible": true,
+        "isOptionsGtemEligible": false
+      },
+      {
+        "securityUuid": "00000000-0000-4000-8000-000000000002",
+        "symbol": "SHOP.TO",
+        "description": "SHOPIFY INC",
+        "listingMarket": "TSX",
+        "marketCapitalization": 243177787600,
+        "sector": "Technology",
+        "industryGroup": "Software",
+        "isOvernightTradingEligible": false,
+        "isOptionsGtemEligible": false
+      },
+      {
+        "securityUuid": "00000000-0000-4000-8000-000000000003",
+        "symbol": "SRHGF",
+        "description": "SHOPRITE HOLDINGS",
+        "listingMarket": "Pink Sheets",
+        "marketCapitalization": 13107609200,
+        "sector": "ConsumerCyclical",
+        "industryGroup": "Retail�Cyclical",
+        "isOvernightTradingEligible": false,
+        "isOptionsGtemEligible": false
+      },
+      {
+        "securityUuid": "00000000-0000-4000-8000-000000000004",
+        "symbol": "SRGHY",
+        "description": "SHOPRITE HOLDINGS ADR EACH REPR 1 ORD ZAR0.01134",
+        "listingMarket": "Pink Sheets",
+        "marketCapitalization": 12276187300,
+        "sector": "ConsumerCyclical",
+        "industryGroup": "Retail�Cyclical",
+        "isOvernightTradingEligible": false,
+        "isOptionsGtemEligible": false
+      },
+      {
+        "securityUuid": "00000000-0000-4000-8000-000000000005",
+        "symbol": "GWKSY",
+        "description": "GAMES WORKSHOP GROUP UNSPON ADS EACH REP 0.1 ORD",
+        "listingMarket": "Pink Sheets",
+        "marketCapitalization": 7935766100,
+        "sector": "ConsumerCyclical",
+        "industryGroup": "Travel & Leisure",
+        "isOvernightTradingEligible": false,
+        "isOptionsGtemEligible": false
+      }
+    ]
+  }
+}
