@@ -13,6 +13,7 @@ from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 
+from app.domain.exchange_calendar import Exchange
 from app.domain.market_time import (
     DEFAULT_MAINTENANCE_WINDOW,
     TORONTO,
@@ -131,9 +132,10 @@ def test_window_parsing_and_wraparound():
 
 
 @pytest.mark.parametrize("day", [date(2026, 11, 1), date(2027, 3, 14)], ids=["fall-back-sunday", "spring-sunday"])
-def test_market_closed_all_day_on_transition_sundays(day):
+@pytest.mark.parametrize("exchange", list(Exchange))
+def test_market_closed_all_day_on_transition_sundays(day, exchange):
     start = datetime.combine(day, time(0, 0), TORONTO).astimezone(UTC)
-    assert not any(is_regular_session(t) for t in minutes(start, start + timedelta(hours=24)))
+    assert not any(is_regular_session(t, exchange) for t in minutes(start, start + timedelta(hours=24)))
 
 
 MARKET_CASES = [
@@ -160,8 +162,10 @@ MARKET_CASES = [
 
 
 @pytest.mark.parametrize(("instant", "open_", "local"), MARKET_CASES, ids=[c[2] for c in MARKET_CASES])
-def test_market_hours_around_dst(instant, open_, local):
-    assert is_regular_session(instant) is open_, local
+@pytest.mark.parametrize("exchange", list(Exchange))
+def test_market_hours_around_dst(instant, open_, local, exchange):
+    # none of these dates is a holiday on either exchange; holidays are covered in test_exchange_calendar
+    assert is_regular_session(instant, exchange) is open_, local
 
 
 # --------------------------------------------------------------------------- order timing guardrail
@@ -181,8 +185,9 @@ def test_market_hours_around_dst(instant, open_, local):
         ("market", u(2027, 3, 15, 13, 45), None),  # Mon 09:45 EDT
     ],
 )
-def test_order_timing_across_dst(order_type, instant, expected):
-    assert check_order_timing(order_type, instant) == expected
+@pytest.mark.parametrize("exchange", list(Exchange))
+def test_order_timing_across_dst(order_type, instant, expected, exchange):
+    assert check_order_timing(order_type, instant, exchange) == expected
 
 
 # ---------------------------------------------------------------- 16:30 snapshot job (real APScheduler trigger)

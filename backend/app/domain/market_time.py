@@ -1,4 +1,4 @@
-"""Toronto wall-clock rules: maintenance window, regular market hours, order timing.
+"""Toronto wall-clock rules: maintenance window, exchange sessions, order timing.
 
 The only place Aurelius names the Toronto time zone. Rules are evaluated on Toronto wall-clock time
 via IANA ``America/Toronto`` (tzdata), never a fixed UTC offset: ET is -05:00 in winter and -04:00 in
@@ -22,10 +22,9 @@ from enum import StrEnum
 from typing import Final
 from zoneinfo import ZoneInfo
 
-TORONTO: Final = ZoneInfo("America/Toronto")  # fails at import if tzdata is missing: fail fast
+from app.domain.exchange_calendar import CalendarNotCovered, Exchange, calendars
 
-MARKET_OPEN: Final = time(9, 30)
-MARKET_CLOSE: Final = time(16, 0)
+TORONTO: Final = ZoneInfo("America/Toronto")  # fails at import if tzdata is missing: fail fast
 
 
 def require_aware(instant: datetime) -> datetime:
@@ -65,24 +64,32 @@ class LocalWindow:
 DEFAULT_MAINTENANCE_WINDOW: Final = LocalWindow.parse("01:55-03:50")
 
 
-def is_regular_session(instant: datetime) -> bool:
-    """09:30 <= Toronto time < 16:00 on Monday to Friday. Exchange holidays are not modelled yet."""
+def is_regular_session(instant: datetime, exchange: Exchange) -> bool:
+    """True inside the exchange's session on that Toronto date: ``open <= local time < close``, using the
+    generated calendar (holidays, early closes). Raises ``CalendarNotCovered`` outside the file's coverage."""
     local = to_toronto(instant)
-    return local.weekday() < 5 and MARKET_OPEN <= local.time().replace(tzinfo=None) < MARKET_CLOSE
+    session = calendars().session(exchange, local.date())
+    return session is not None and session.open <= local.time().replace(tzinfo=None) < session.close
 
 
 class TimingViolation(StrEnum):
     MAINTENANCE_WINDOW = "maintenance_window"
     MARKET_CLOSED_FOR_MARKET_ORDER = "market_closed_for_market_order"
+    CALENDAR_NOT_COVERED = "calendar_not_covered"
 
 
 def check_order_timing(
-    order_type: str, instant: datetime, window: LocalWindow = DEFAULT_MAINTENANCE_WINDOW
+    order_type: str, instant: datetime, exchange: Exchange, window: LocalWindow = DEFAULT_MAINTENANCE_WINDOW
 ) -> TimingViolation | None:
     """Guardrail rule (spec section 9): every order type is refused inside the maintenance window; market
-    orders additionally need the regular session; limit orders are allowed any other time."""
+    orders additionally need a session on the exchange's calendar (fail closed beyond its coverage);
+    limit orders are allowed any other time."""
     if window.contains(instant):
         return TimingViolation.MAINTENANCE_WINDOW
-    if order_type == "market" and not is_regular_session(instant):
-        return TimingViolation.MARKET_CLOSED_FOR_MARKET_ORDER
+    if order_type == "market":
+        try:
+            if not is_regular_session(instant, exchange):
+                return TimingViolation.MARKET_CLOSED_FOR_MARKET_ORDER
+        except CalendarNotCovered:
+            return TimingViolation.CALENDAR_NOT_COVERED
     return None

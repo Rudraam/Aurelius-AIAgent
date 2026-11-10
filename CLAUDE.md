@@ -21,11 +21,13 @@ The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (
 - **Real account data never enters git.** That means no account IDs or numbers, balances, positions, activities, order history, names or emails from the live account, in any file, commit message or test.
 - **Live observations stay in `backend/.spike/`, which is git-ignored.** That covers `observations.jsonl`, the encrypted auth state, and live fixtures (`backend/.spike/fixtures/`). Never move or copy them anywhere tracked unless the next point is followed.
 - **Promoting a fixture into `backend/tests/fixtures/` is a deliberate step:**
-  1. redact it with `app/redaction.Redactor`, which maps every GUID onto the fixed `FAKE_GUIDS` set and masks account numbers to `****1234`;
+  1. redact it with `app/redaction.Redactor`, which maps every GUID onto the fixed `FAKE_GUIDS` set, masks account numbers to `****1234`, and replaces non-GUID account IDs with `REDACTED-ACCOUNT-ID`. It is field-aware: numbers under `MARKET_DATA_KEYS`/`MARKET_DATA_PATHS` (volumes, sizes, prices, returns) are kept exactly, and unknown numeric fields fail closed;
   2. read it by eye;
   3. make sure `tests/unit/test_fixture_guard.py` passes.
 
-  The guard fails on any GUID outside `FAKE_GUIDS`, any standalone 7-10 digit run, any unmasked account-number field, or any email address.
+  The guard fails on any GUID outside `FAKE_GUIDS`, any standalone 7-10 digit run, any unmasked account-number field, any account ID that is neither a fake GUID nor the placeholder, or any email address.
+  - In JSON it checks field by field, and only *numbers* under allowlisted market-data fields may have 7-10 digits. Markdown and other text get no exemption. Classify a new market field in `app/redaction.py`; never widen the exemption to strings.
+  - The guard also scans `docs/spikes/`, so don't write example account-number-shaped numbers in docs.
 - **gitleaks runs as a pre-commit hook** (`.githooks/pre-commit`, pinned image `gitleaks:v8.21.2@sha256:0e99e88…`). It fails closed: if neither a `gitleaks` binary nor Docker is available, the commit is blocked.
   - Enable it once per clone with `git config core.hooksPath .githooks`.
   - Never use `--no-verify`.
@@ -34,6 +36,7 @@ The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (
 ## Non-negotiable invariants (never weaken one to make a test pass; stop and explain instead)
 
 1. **No autonomous orders.** Every create needs explicit confirmation in Aurelius **and** push approval in the Questrade app.
+   - Until Questrade allowlists Aurelius (A13), Aurelius never submits. It produces an A15 order plan: limit orders only, a one-line summary, and exact instruction text for Claude. Rudra's comparison of the push approval against that summary is the binding check.
 2. **Read-only by default.** `AURELIUS_TRADING_ENABLED=false` makes `create_order_instruction` unreachable.
 3. **Tool allowlist.**
    - Read: `list_accounts get_balances get_positions get_order_history get_account_activities search_symbols get_quotes get_historical_data get_instruction list_instructions`.
@@ -71,7 +74,13 @@ The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (
    - All Toronto logic goes through `app/domain/market_time.TORONTO`, which is IANA `America/Toronto` from the `tzdata` package. It is the only `ZoneInfo(...)` call in `app/`; `tests/unit/test_no_fixed_offsets.py` enforces this.
    - Time rules compare Toronto **wall-clock** time. On spring forward, the maintenance window runs from 01:55 EST straight through to 03:50 EDT with no gap.
    - **Intentional double-block on fall back (approved 2026-11-09):** the repeated hour counts on both passes. So the window blocks 01:55-01:59 EDT (first pass), allows 01:00-01:54 EST, then blocks 01:55-03:50 EST: 120 real minutes instead of 115. This is deliberate and fail-closed. Do not "fix" it to a single pass.
-   - **Exchange holidays and early closes are not modelled yet.** `is_regular_session` knows weekdays only. A holiday calendar is a hard prerequisite for ever enabling trading (M1, see "Planned for M1" below).
+   - **Exchange sessions** come from `app/domain/exchange_calendar.py`, which reads the generated `app/domain/data/exchange_sessions.json`. That file covers XTSE and XNYS, holidays and early closes, in Toronto wall-clock time.
+     - `is_regular_session(instant, exchange)` and `check_order_timing(order_type, instant, exchange)` require the exchange.
+     - A date outside coverage raises `CalendarNotCovered`. Market orders then get `CALENDAR_NOT_COVERED` (fail closed).
+     - The exchange comes from `exchange_for(symbol, listingMarket)`: TSX → XTSE, NASDAQ/NYSE → XNYS, with `.TO` cross-checked. Anything else raises `UnknownExchange`.
+     - Regenerate the file with `uv run python scripts/generate_exchange_calendars.py`. Never hand-edit it; a test compares it with the generator.
+     - `tests/unit/test_exchange_calendar.py` fails once fewer than 90 days of coverage remain (coverage currently ends 2027-12-31).
+     - `exchange_calendars` (and so pandas) is **dev-only**. `app/` must never import it; a test checks this, and the image has no dev group.
    - `tests/unit/test_dst.py` covers 2026-11-01 and 2027-03-14 for the maintenance window, market hours, order timing and the APScheduler 16:30 trigger.
 
 ## Auth design (decisions of 2026-11-09)
@@ -140,7 +149,7 @@ The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (
   - `uv run mypy` (strict, over `app/`)
   - `uv run pytest`
 - Docker: `docker build -t aurelius-api:dev backend/`. Check arm64 with `docker buildx build --platform linux/arm64 --load …`.
-- Ask before adding a dependency that isn't in the spec stack. Approved additions: `httpx2` (it replaces httpx), `tzdata`, and Authlib (approved but unused). APScheduler is in the spec stack.
+- Ask before adding a dependency that isn't in the spec stack. Approved additions: `httpx2` (it replaces httpx), `tzdata`, Authlib (approved but unused), and `exchange_calendars` (dev group only). APScheduler is in the spec stack.
 - **Supply chain: minimum release age is 14 days, for everything** (Python packages, GitHub Actions, Docker images). Never adopt a version published less than 14 days ago.
   - uv enforces it: `[tool.uv] exclude-newer = "14 days"` in `backend/pyproject.toml`, recorded in `uv.lock` as `exclude-newer-span = "P14D"`.
   - Dependabot (`.github/dependabot.yml`) uses `cooldown: default-days: 14`, runs weekly, and groups minor and patch updates (majors come as their own PRs).
@@ -160,10 +169,9 @@ The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (
 - **Branch names: lowercase kebab-case, `[a-z0-9-]` only** (e.g. `m1-holiday-calendars`). No slashes, underscores, uppercase or dots. Create and change branches with `git switch` (`git checkout` is denied).
 - When the docs and the server disagree, trust the server and record the difference in `docs/spikes/`.
 
-## Planned for M1 (decided, not yet built)
+## Milestones
 
-- **Exchange holiday calendars: a hard prerequisite for ever setting `AURELIUS_TRADING_ENABLED=true`.**
-  - Calendars are per exchange: XTSE for `.TO` symbols and XNYS for US symbols, including early closes.
-  - `exchange_calendars` is a **dev-only** dependency. A script uses it to generate a committed holiday/session file; the runtime reads only that file, so pandas never ships in the image.
-  - **Fail closed:** market orders are blocked for any date beyond the file's coverage.
-  - A test fails once fewer than 90 days of coverage remain, forcing a regeneration.
+The revised plan (2026-11-10) is in the spec, after Amendments A13-A15.
+- **M1 (foundations):** exchange calendars, the field-aware redactor and guard, `app/integrations/json_decimal` (broker JSON goes straight to `Decimal`; floats never reach domain code), and amendments A13-A15.
+- **M2 onward** waits until Rudra resolves `list_accounts` returning "You do not have an active account."
+- **Before ever setting `AURELIUS_TRADING_ENABLED=true`:** coverage must be at least 90 days, `listingMarket` values observed at M3 must be confirmed, and the A15 handoff must be built (M4).
