@@ -63,7 +63,7 @@ See `CLAUDE.md`.
 > - The authorize request then hit Questrade's generic error page, because `claude-code-public` is not registered with Aurelius's redirect URI.
 > - Aurelius must **never** operate under another application's `client_id`, so DCR is not a usable fallback, even if a redirect URI could be made to match.
 > - The planned paired probe (our `client_id` vs a bogus one) was skipped: it would have sent requests under Claude Code's identity, and no result could change the decision.
-> - **Strategy: CIMD only.** The interim host is GitHub Pages (`Rudraam/aurelius-oauth`) on `aurelius.rivenpath.ai`; it moves to the VM's Caddy later at the same, permanent URL.
+> - **Strategy: CIMD only.** The interim host is this repo's GitHub Pages (an Actions deploy of `deploy/static` only) on `aurelius.rivenpath.ai`; it moves to the VM's Caddy later at the same, permanent URL.
 
 *The analysis below predates the finding above and is kept for the record; the DCR parts are superseded.*
 

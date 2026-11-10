@@ -1,0 +1,53 @@
+# Publishes deploy/static, and nothing else, to GitHub Pages (custom domain aurelius.rivenpath.ai).
+# deploy/static/oauth/client-metadata.json is Aurelius's permanent OAuth client_id (CIMD).
+# Guarded by backend/tests/unit/test_publish_guard.py: allowlisted files only, exact upload path,
+# pinned action SHAs, job-level permissions.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/static/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Refuse to publish anything but the allowlisted files
+        run: |
+          published="$(cd deploy/static && find . -mindepth 1 \( -type f -o -type l \) | sed 's|^\./||' | sort)"
+          expected="oauth/client-metadata.json"
+          if [ "$published" != "$expected" ]; then
+            echo "::error::deploy/static must contain exactly: $expected"
+            printf 'found:\n%s\n' "$published"
+            exit 1
+          fi
+
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: deploy/static
+
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

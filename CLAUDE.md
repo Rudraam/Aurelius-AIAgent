@@ -67,7 +67,8 @@ The full spec is in `AURELIUS_PHASE1.md`. Spike findings are in `docs/spikes/` a
   - On Linux, httpx2 trusts **only the OS CA store** (no certifi), so the Docker image installs `ca-certificates`, and the build fails if it's missing.
 - **Client identity: CIMD is the only strategy. There is no DCR code, and none may be added back.**
   - The permanent client_id is `https://aurelius.rivenpath.ai/oauth/client-metadata.json`. The file is `deploy/static/oauth/client-metadata.json`, rendered by `backend/scripts/render_cimd.py`, and guarded by `tests/unit/test_cimd_document.py`.
-  - It is served statically: by GitHub Pages (`Rudraam/aurelius-oauth`, a byte-for-byte mirror) until the VM exists, then by Caddy.
+  - It is served statically, from the one file only (no copies anywhere). Until the VM exists, this repo's GitHub Pages serves it: `.github/workflows/pages.yml` uploads exactly `deploy/static`. After that, Caddy serves the same directory.
+  - Only allowlisted files may live in `deploy/static`; `tests/unit/test_publish_guard.py` and the workflow's own guard step both fail otherwise. There is no `CNAME` file: Actions-based Pages ignores it, and the custom domain is set in repo settings.
   - `aurelius auth login` and `aurelius auth refresh` exit with a clear error if `AURELIUS_CIMD_CLIENT_ID_URL` is unset or invalid, before touching the network or the store.
   - Runbook: `docs/runbooks/cimd-login.md`.
 - **Invariant (client_id):** every authorize, token and refresh request carries **exactly** the configured CIMD URL as `client_id`.
