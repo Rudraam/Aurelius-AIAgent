@@ -14,7 +14,7 @@ from app.integrations.questrade.auth import ApprovalBearerAuth, ReadBearerAuth, 
 from app.integrations.questrade.errors import AuthExpired, ReauthRequired
 from app.integrations.questrade.token_store import AuthState, InMemoryTokenStore
 from tests.fakes import FakeHttp
-from tests.unit.conftest import MCP_URL, TOKEN_URL, logged_in_store
+from tests.unit.conftest import CLIENT_ID, MCP_URL, TOKEN_URL, logged_in_store
 
 ROTATED = {
     "access_token": "ACCESS-2-secretvalue",
@@ -85,7 +85,7 @@ async def test_concurrent_401s_cause_exactly_one_rotation(clock, client_reg):
     store = SpyStore(inner, events)
     fake = setup(events, valid={"ACCESS-2-secretvalue"})  # server already revoked ACCESS-1
     async with fake.client() as http:
-        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         async with httpx2.AsyncClient(auth=ReadBearerAuth(mgr), transport=fake.transport()) as mcp:
             responses = await asyncio.gather(*(mcp.post(MCP_URL, json={"i": i}) for i in range(20)))
     assert all(r.status_code == 200 for r in responses)
@@ -102,7 +102,7 @@ async def test_concurrent_expiry_refresh_is_single_flight(clock, client_reg):
     store = logged_in_store(clock, client_reg, lifetime=60)
     clock.advance(120)
     async with fake.client() as http:
-        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         tokens = await asyncio.gather(*(mgr.access_token() for _ in range(15)))
     assert set(tokens) == {"ACCESS-2-secretvalue"}
     assert fake.count("POST", TOKEN_URL) == 1
@@ -113,7 +113,7 @@ async def test_rotated_refresh_token_saved_before_new_access_token_used(clock, c
     store = SpyStore(logged_in_store(clock, client_reg), events)
     fake = setup(events, valid={"ACCESS-2-secretvalue"})
     async with fake.client() as http:
-        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         async with httpx2.AsyncClient(auth=ReadBearerAuth(mgr), transport=fake.transport()) as mcp:
             r = await mcp.post(MCP_URL, json={})
     assert r.status_code == 200
@@ -125,7 +125,7 @@ async def test_new_access_token_never_used_if_save_fails(clock, client_reg):
     store = SpyStore(logged_in_store(clock, client_reg), events, fail_on_save=True)
     fake = setup(events, valid={"ACCESS-2-secretvalue"})
     async with fake.client() as http:
-        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         async with httpx2.AsyncClient(auth=ReadBearerAuth(mgr), transport=fake.transport()) as mcp:
             with pytest.raises(RuntimeError, match="disk full"):
                 await mcp.post(MCP_URL, json={})
@@ -137,7 +137,7 @@ async def test_non_rotating_server_keeps_old_refresh_token(clock, client_reg):
     fake = setup(valid=set(), token=httpx2.Response(200, json=body))
     store = logged_in_store(clock, client_reg)
     async with fake.client() as http:
-        await TokenManager(store, http, TOKEN_URL, MCP_URL, clock=clock).refresh(stale_access_token=None)
+        await TokenManager(store, http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock).refresh(stale_access_token=None)
     s = await store.load()
     assert s.tokens is not None and s.tokens.refresh_token == "REFRESH-1-secretvalue"
     assert s.refresh_rotated_at is None
@@ -146,7 +146,7 @@ async def test_non_rotating_server_keeps_old_refresh_token(clock, client_reg):
 async def test_invalid_grant_maps_to_reauth_required(clock, client_reg):
     fake = setup(valid=set(), token=httpx2.Response(400, json={"error": "invalid_grant"}))
     async with fake.client() as http:
-        mgr = TokenManager(logged_in_store(clock, client_reg), http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(logged_in_store(clock, client_reg), http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         async with httpx2.AsyncClient(auth=ReadBearerAuth(mgr), transport=fake.transport()) as mcp:
             with pytest.raises(ReauthRequired, match="invalid_grant"):
                 await mcp.post(MCP_URL, json={})
@@ -155,12 +155,14 @@ async def test_invalid_grant_maps_to_reauth_required(clock, client_reg):
 async def test_no_tokens_is_reauth_required(clock):
     async with FakeHttp().client() as http:
         with pytest.raises(ReauthRequired):
-            await TokenManager(InMemoryTokenStore(), http, TOKEN_URL, MCP_URL, clock=clock).access_token()
+            await TokenManager(InMemoryTokenStore(), http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock).access_token()
 
 
 async def test_proactive_refresh_threshold(clock, client_reg):
     async with FakeHttp().client() as http:
-        mgr = TokenManager(logged_in_store(clock, client_reg, lifetime=1000), http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(
+            logged_in_store(clock, client_reg, lifetime=1000), http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock
+        )
         assert not await mgr.needs_proactive_refresh()
         clock.advance(810)  # 190s of 1000s left (<20%)
         assert await mgr.needs_proactive_refresh()
@@ -171,7 +173,7 @@ async def test_refresh_never_logs_tokens(clock, client_reg, caplog):
     store = logged_in_store(clock, client_reg)
     fake = setup(valid={"ACCESS-2-secretvalue"})
     async with fake.client() as http:
-        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         async with httpx2.AsyncClient(auth=ReadBearerAuth(mgr), transport=fake.transport()) as mcp:
             await mcp.post(MCP_URL, json={})
     assert "rotated=True" in caplog.text
@@ -187,7 +189,7 @@ async def test_read_retries_once_on_401_invalid_token(clock, client_reg):
     events: list[tuple[str, str]] = []
     fake = setup(events, valid={"ACCESS-2-secretvalue"})
     async with fake.client() as http:
-        mgr = TokenManager(logged_in_store(clock, client_reg), http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(logged_in_store(clock, client_reg), http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         async with httpx2.AsyncClient(auth=ReadBearerAuth(mgr), transport=fake.transport()) as mcp:
             r = await mcp.post(MCP_URL, json={})
     assert r.status_code == 200
@@ -207,7 +209,7 @@ async def test_read_does_not_retry_401_without_invalid_token(clock, client_reg, 
     reject = httpx2.Response(401, headers={"www-authenticate": www_auth} if www_auth else {})
     fake = setup(events, valid={"ACCESS-2-secretvalue"}, reject=reject)
     async with fake.client() as http:
-        mgr = TokenManager(logged_in_store(clock, client_reg), http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(logged_in_store(clock, client_reg), http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         async with httpx2.AsyncClient(auth=ReadBearerAuth(mgr), transport=fake.transport()) as mcp:
             with pytest.raises(AuthExpired):
                 await mcp.post(MCP_URL, json={})
@@ -218,7 +220,7 @@ async def test_read_does_not_retry_401_without_invalid_token(clock, client_reg, 
 async def test_read_401_after_refresh_is_reauth_not_a_loop(clock, client_reg):
     fake = setup(valid=set())
     async with fake.client() as http:
-        mgr = TokenManager(logged_in_store(clock, client_reg), http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(logged_in_store(clock, client_reg), http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         async with httpx2.AsyncClient(auth=ReadBearerAuth(mgr), transport=fake.transport()) as mcp:
             with pytest.raises(ReauthRequired):
                 await mcp.post(MCP_URL, json={})
@@ -233,7 +235,7 @@ async def test_403_insufficient_scope_maps_to_reauth_with_scope(clock, client_re
     )
     fake = setup(valid=set(), reject=reject)
     async with fake.client() as http:
-        mgr = TokenManager(logged_in_store(clock, client_reg), http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(logged_in_store(clock, client_reg), http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         async with httpx2.AsyncClient(auth=auth_cls(mgr), transport=fake.transport()) as mcp:
             with pytest.raises(ReauthRequired) as ei:
                 await mcp.post(MCP_URL, json={})
@@ -251,7 +253,7 @@ async def test_approval_401_raises_auth_expired_and_never_resends(clock, client_
     reject = httpx2.Response(401, headers={"www-authenticate": www_auth})
     fake = setup(valid={"ACCESS-2-secretvalue"}, reject=reject)
     async with fake.client() as http:
-        mgr = TokenManager(logged_in_store(clock, client_reg), http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(logged_in_store(clock, client_reg), http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         async with httpx2.AsyncClient(auth=ApprovalBearerAuth(mgr), transport=fake.transport()) as mcp:
             with pytest.raises(AuthExpired):
                 await mcp.post(MCP_URL, json={"method": "tools/call", "params": {"name": "create_order_instruction"}})
@@ -265,7 +267,7 @@ async def test_approval_refreshes_first_when_under_5_minutes_left(clock, client_
     clock.advance(1800 - 4 * 60)  # 4 minutes left: fine for reads, too little for approval
     fake = setup(events, valid={"ACCESS-1-secretvalue", "ACCESS-2-secretvalue"})
     async with fake.client() as http:
-        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         async with httpx2.AsyncClient(auth=ApprovalBearerAuth(mgr), transport=fake.transport()) as mcp:
             r = await mcp.post(MCP_URL, json={})
     assert r.status_code == 200
@@ -278,7 +280,7 @@ async def test_approval_does_not_refresh_with_plenty_of_time(clock, client_reg):
     clock.advance(1800 - 10 * 60)  # 10 minutes left
     fake = setup(valid={"ACCESS-1-secretvalue"})
     async with fake.client() as http:
-        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         async with httpx2.AsyncClient(auth=ApprovalBearerAuth(mgr), transport=fake.transport()) as mcp:
             assert (await mcp.post(MCP_URL, json={})).status_code == 200
     assert fake.count("POST", TOKEN_URL) == 0
@@ -289,7 +291,7 @@ async def test_approval_pre_refresh_failure_sends_nothing(clock, client_reg):
     clock.advance(1800 - 60)
     fake = setup(valid={"ACCESS-1-secretvalue"}, token=httpx2.Response(503, json={"error": "temporarily_unavailable"}))
     async with fake.client() as http:
-        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         async with httpx2.AsyncClient(auth=ApprovalBearerAuth(mgr), transport=fake.transport()) as mcp:
             with pytest.raises(AuthExpired):
                 await mcp.post(MCP_URL, json={})
@@ -302,7 +304,7 @@ async def test_read_and_approval_min_remaining_differ(clock, client_reg):
     clock.advance(1800 - 4 * 60)
     fake = setup(valid=set())
     async with fake.client() as http:
-        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, clock=clock)
+        mgr = TokenManager(store, http, TOKEN_URL, MCP_URL, CLIENT_ID, clock=clock)
         assert await mgr.access_token() == "ACCESS-1-secretvalue"
         assert await mgr.access_token(min_remaining=timedelta(minutes=5)) == "ACCESS-2-secretvalue"
     assert fake.count("POST", TOKEN_URL) == 1

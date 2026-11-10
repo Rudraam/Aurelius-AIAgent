@@ -13,7 +13,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from app.domain.order_args import order_args_hash
 from app.domain.order_state import OrderDraft, OrderStatus
-from app.integrations.questrade.auth import TokenManager
+from app.integrations.questrade.auth import CimdClientId, TokenManager
 from app.integrations.questrade.errors import AuthExpired, ReauthRequired, find_in_chain
 from app.integrations.questrade.token_store import AuthState, ClientRegistration, InMemoryTokenStore, TokenSet
 from app.integrations.questrade.transport import approval_session, read_session
@@ -22,6 +22,7 @@ from tests.fakes import FakeHttp
 
 MCP_URL = "https://mcp.example.test/mcp"
 TOKEN_URL = "https://login.example.test/connect/token"
+CLIENT_ID = CimdClientId("https://aurelius.example.test/oauth/client-metadata.json")
 
 
 class FakeQuestrade:
@@ -74,8 +75,7 @@ def store(expired: bool, minutes_left: float = 30) -> InMemoryTokenStore:
         AuthState(
             version=1,
             client=ClientRegistration(
-                client_id="https://aurelius.example.test/oauth/client-metadata.json",
-                strategy="cimd",
+                client_id=CLIENT_ID.url,
                 issuer="https://login.example.test",
                 redirect_uris=("http://127.0.0.1:8765/callback",),
             ),
@@ -107,7 +107,7 @@ async def test_read_session_refreshes_and_calls_tool(locally_expired):
     fake, app = token_fake(), FakeQuestrade(valid={"NEW"})
     st = store(expired=locally_expired)
     async with fake.client() as http, app.inner.router.lifespan_context(app.inner):
-        tokens = TokenManager(st, http, TOKEN_URL, MCP_URL)
+        tokens = TokenManager(st, http, TOKEN_URL, MCP_URL, CLIENT_ID)
         async with read_session(MCP_URL, tokens, transport=httpx2.ASGITransport(app=app)) as client:
             names = [t.name for t in (await client.list_tools()).tools]
             res = await client.call_tool("list_accounts", {})
@@ -123,7 +123,7 @@ async def test_read_session_refreshes_and_calls_tool(locally_expired):
 async def test_read_refresh_rejected_surfaces_reauth_through_sdk():
     fake, app = token_fake(httpx2.Response(400, json={"error": "invalid_grant"})), FakeQuestrade(valid=set())
     async with fake.client() as http, app.inner.router.lifespan_context(app.inner):
-        tokens = TokenManager(store(expired=False), http, TOKEN_URL, MCP_URL)
+        tokens = TokenManager(store(expired=False), http, TOKEN_URL, MCP_URL, CLIENT_ID)
         with pytest.raises(BaseException) as ei:
             async with read_session(MCP_URL, tokens, transport=httpx2.ASGITransport(app=app)) as client:
                 await client.list_tools()
@@ -135,7 +135,7 @@ async def test_approval_401_through_sdk_sends_once_executes_nothing_and_marks_su
     ends in submit_failed and the fake confirms create_order_instruction never executed."""
     fake, app = token_fake(), FakeQuestrade(valid={"NEW"})  # "OLD" is rejected at the edge
     async with fake.client() as http, app.inner.router.lifespan_context(app.inner):
-        tokens = TokenManager(store(expired=False), http, TOKEN_URL, MCP_URL)
+        tokens = TokenManager(store(expired=False), http, TOKEN_URL, MCP_URL, CLIENT_ID)
 
         async def create(args: Mapping[str, Any]) -> CreateOutcome:
             async with approval_session(MCP_URL, tokens, transport=httpx2.ASGITransport(app=app)) as client:
@@ -169,7 +169,7 @@ async def test_approval_401_through_sdk_sends_once_executes_nothing_and_marks_su
 async def test_approval_session_pre_refreshes_and_calls_create_once():
     fake, app = token_fake(), FakeQuestrade(valid={"OLD", "NEW"})
     async with fake.client() as http, app.inner.router.lifespan_context(app.inner):
-        tokens = TokenManager(store(expired=False, minutes_left=3), http, TOKEN_URL, MCP_URL)
+        tokens = TokenManager(store(expired=False, minutes_left=3), http, TOKEN_URL, MCP_URL, CLIENT_ID)
         async with approval_session(MCP_URL, tokens, transport=httpx2.ASGITransport(app=app)) as client:
             await client.call_tool("create_order_instruction", {"accountId": "a", "operation": "create"})
     assert fake.count("POST", TOKEN_URL) == 1
@@ -181,7 +181,7 @@ async def test_auth_expired_type_is_findable_from_sdk_error():
     """Guards the contract submit_draft relies on: our AuthExpired survives the SDK's wrapping."""
     fake, app = token_fake(), FakeQuestrade(valid=set())
     async with fake.client() as http, app.inner.router.lifespan_context(app.inner):
-        tokens = TokenManager(store(expired=False), http, TOKEN_URL, MCP_URL)
+        tokens = TokenManager(store(expired=False), http, TOKEN_URL, MCP_URL, CLIENT_ID)
         with pytest.raises(BaseException) as ei:
             async with approval_session(MCP_URL, tokens, transport=httpx2.ASGITransport(app=app)) as client:
                 await client.list_tools()

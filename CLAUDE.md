@@ -63,12 +63,18 @@ The full spec is in `AURELIUS_PHASE1.md`. Spike findings are in `docs/spikes/` a
 
 ## Auth design (decisions of 2026-11-09)
 
-- **One HTTP stack: `httpx2`.** The MCP SDK transport, token endpoint, discovery and DCR all use it, and `httpx` is not a dependency.
+- **One HTTP stack: `httpx2`.** The MCP SDK transport, the token endpoint and discovery all use it, and `httpx` is not a dependency.
   - On Linux, httpx2 trusts **only the OS CA store** (no certifi), so the Docker image installs `ca-certificates`, and the build fails if it's missing.
-- **Client registration: CIMD.**
-  - The permanent client_id is `https://aurelius.rivenpath.ai/oauth/client-metadata.json`. The file is `deploy/static/oauth/client-metadata.json`, rendered by `backend/scripts/render_cimd.py`, served statically by Caddy, and guarded by `tests/unit/test_cimd_document.py`.
-  - DCR is a fallback, allowed only because the server publishes a `registration_endpoint` (`choose_strategy`).
-  - Migration steps: `docs/runbooks/dcr-to-cimd.md`.
+- **Client identity: CIMD is the only strategy. There is no DCR code, and none may be added back.**
+  - The permanent client_id is `https://aurelius.rivenpath.ai/oauth/client-metadata.json`. The file is `deploy/static/oauth/client-metadata.json`, rendered by `backend/scripts/render_cimd.py`, and guarded by `tests/unit/test_cimd_document.py`.
+  - It is served statically: by GitHub Pages (`Rudraam/aurelius-oauth`, a byte-for-byte mirror) until the VM exists, then by Caddy.
+  - `aurelius auth login` and `aurelius auth refresh` exit with a clear error if `AURELIUS_CIMD_CLIENT_ID_URL` is unset or invalid, before touching the network or the store.
+  - Runbook: `docs/runbooks/cimd-login.md`.
+- **Invariant (client_id):** every authorize, token and refresh request carries **exactly** the configured CIMD URL as `client_id`.
+  - The configured value is a validated `CimdClientId` (https, a host, a non-root path, no query, fragment or credentials). It is passed into `cimd_registration`, `begin_login`, `complete_login`, `_token_request` (the single path for every token call) and `TokenManager`.
+  - Each of these calls `CimdClientId.require(...)`, an exact comparison (no case folding, no trailing-slash tolerance), and raises `ClientIdMismatch` **before** sending anything.
+  - A stored client that isn't the configured URL is never refreshed. Stored state with a non-CIMD client (`strategy` other than cimd, or a `client_secret`) is refused on load.
+  - `tests/unit/test_client_id_invariant.py` enforces all of this. It inspects every request on the wire, injects a foreign `client_id` at each check, and scans `app/` for DCR code.
 - **Login is hand-rolled** in `app/integrations/questrade/auth.py`: PKCE S256, constant-time `state`, RFC 9207 `iss`, RFC 8707 `resource`. The SDK's `OAuthClientProvider` is not used.
 - **Two auth classes, never shared.** Both are `httpx2.Auth`, which the SDK requires.
   - `ReadBearerAuth` (via `read_session`): refreshes and resends once **only** on a 401 with `WWW-Authenticate: error="invalid_token"`. Any other 401 raises `AuthExpired`. A 401 immediately after a refresh raises `ReauthRequired`.
@@ -94,7 +100,9 @@ The full spec is in `AURELIUS_PHASE1.md`. Spike findings are in `docs/spikes/` a
   - no token: JSON body, with `resource_metadata` in `WWW-Authenticate`;
   - bad or expired token: `text/plain` body, `error="invalid_token"`, and **no** `resource_metadata`.
   - Map errors on status + `WWW-Authenticate` only, never on the body.
-- The DCR endpoint is `https://mcp.questrade.com/connect/register`, which is not on the issuer host (`login.questrade.com`).
+- **Questrade's DCR endpoint is not real registration.** On 2026-11-09, `POST https://mcp.questrade.com/connect/register` (advertised as `registration_endpoint`, on the MCP host rather than the issuer) answered Aurelius with the `client_id` **`claude-code-public`**, which is Claude Code's pre-registered client. The authorize request then hit Questrade's generic error page, because that client doesn't allow our redirect URI.
+  - Questrade's technical reference lists only CIMD and pre-registered clients; nothing uses DCR.
+  - Never operate under another application's `client_id`. That is why DCR was removed entirely. Details are in `docs/spikes/questrade-auth.md` §3.
 - mcp 2.x renamed `FastMCP` to `mcp.server.mcpserver.MCPServer`. The fake server and the tests use `MCPServer` with `streamable_http_app(json_response=True, stateless_http=True, transport_security=...(enable_dns_rebinding_protection=False))` over `httpx2.ASGITransport`. Start the app's lifespan with `app.router.lifespan_context(app)`.
 - `respx` only patches `httpx`. For httpx2 tests, use `tests/fakes.py::FakeHttp`, which routes requests and counts calls.
 - `tests/deploy/` runs the real Caddyfile in `caddy:2.10.2` (marker `docker`, skipped without Docker). Static files mount at `/srv/static`; docker-compose must use the same path.

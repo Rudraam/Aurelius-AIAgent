@@ -1,4 +1,4 @@
-"""Questrade OAuth: discovery, client registration (CIMD, DCR fallback), hand-rolled login, token
+"""Questrade OAuth: discovery, CIMD client identity (the only strategy), hand-rolled login, token
 lifecycle, and the bearer ``httpx2.Auth`` classes handed to the MCP SDK transport (one for read
 sessions, a separate never-resend one for approval sessions). One HTTP stack: httpx2 throughout.
 
@@ -8,7 +8,10 @@ interactive flow when a refresh fails. We use no private SDK API; the SDK only s
 
 Security rules for this module:
 - Never log or put into an exception message: access/refresh tokens, PKCE verifier, auth code,
-  client secret, OAuth ``state``.
+  OAuth ``state``.
+- Invariant: every authorize, token and refresh request carries exactly the configured CIMD URL as
+  ``client_id`` (``CimdClientId.require``). There is no dynamic client registration: Questrade's DCR
+  endpoint returned Claude Code's ``claude-code-public`` client (2026-11-09), so DCR was removed.
 - A rotated refresh token is durably saved (``TokenStore.save``) before the new access token is
   returned to any caller.
 """
@@ -31,6 +34,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.integrations.questrade.errors import (
     AuthExpired,
+    ClientIdMismatch,
     OAuthProtocolError,
     ReauthRequired,
     TokenStoreConflict,
@@ -38,7 +42,6 @@ from app.integrations.questrade.errors import (
 from app.integrations.questrade.token_store import (
     AuthState,
     ClientRegistration,
-    Strategy,
     TokenSet,
     TokenStore,
     utcnow,
@@ -81,7 +84,6 @@ class AuthServerMetadata(BaseModel):
     issuer: str
     authorization_endpoint: str
     token_endpoint: str
-    registration_endpoint: str | None = None
     client_id_metadata_document_supported: bool = False
     code_challenge_methods_supported: list[str] = []
     authorization_response_iss_parameter_supported: bool = False
@@ -144,18 +146,38 @@ async def _get_json(http: httpx2.AsyncClient, url: str) -> Any:
     return r.json()
 
 
-# --------------------------------------------------------------------------- client registration
+# --------------------------------------------------------------------------- client identity (CIMD only)
 
 
-def choose_strategy(asm: AuthServerMetadata, cimd_client_id_url: str | None) -> Strategy:
-    """CIMD first. DCR only when the server publishes a registration endpoint."""
-    if asm.client_id_metadata_document_supported and cimd_client_id_url:
-        return "cimd"
-    if asm.registration_endpoint:
-        return "dcr"
-    raise OAuthProtocolError(
-        "server supports neither CIMD (with a configured client_id URL) nor dynamic client registration"
-    )
+@dataclass(frozen=True, slots=True)
+class CimdClientId:
+    """Aurelius's one and only OAuth client_id: the URL of its Client ID Metadata Document.
+
+    Every function that puts a client_id on the wire takes this value and refuses to send anything else.
+    """
+
+    url: str
+
+    def __post_init__(self) -> None:
+        p = urlsplit(self.url)
+        problems = []
+        if p.scheme != "https":
+            problems.append("must be https")
+        if not p.hostname:
+            problems.append("must have a host")
+        if p.path in ("", "/"):
+            problems.append("must have a non-root path")
+        if p.query or p.fragment:
+            problems.append("must not have a query or fragment")
+        if p.username or p.password:
+            problems.append("must not contain credentials")
+        if problems:
+            raise ValueError(f"invalid CIMD client_id URL {self.url!r}: {', '.join(problems)}")
+
+    def require(self, actual: object, where: str) -> None:
+        """Raise ``ClientIdMismatch`` unless ``actual`` is exactly this client_id."""
+        if not isinstance(actual, str) or not secrets.compare_digest(actual.encode(), self.url.encode()):
+            raise ClientIdMismatch(f"{where}: client_id {actual!r} is not the configured CIMD URL {self.url!r}")
 
 
 def cimd_document(client_id_url: str, redirect_uris: Sequence[str]) -> dict[str, Any]:
@@ -171,49 +193,19 @@ def cimd_document(client_id_url: str, redirect_uris: Sequence[str]) -> dict[str,
 
 
 async def cimd_registration(
-    http: httpx2.AsyncClient, asm: AuthServerMetadata, client_id_url: str
+    http: httpx2.AsyncClient, asm: AuthServerMetadata, client_id: CimdClientId
 ) -> ClientRegistration:
-    """Verify the published CIMD document and build the registration from it."""
-    doc = await _get_json(http, client_id_url)
-    if not isinstance(doc, dict) or doc.get("client_id") != client_id_url:
-        raise OAuthProtocolError(f"CIMD document at {client_id_url} does not declare itself as client_id")
+    """Verify the server accepts CIMD and the published document names exactly ``client_id``."""
+    if not asm.client_id_metadata_document_supported:
+        raise OAuthProtocolError("authorization server does not advertise CIMD support")
+    doc = await _get_json(http, client_id.url)
+    if not isinstance(doc, dict):
+        raise OAuthProtocolError(f"CIMD document at {client_id.url} is not a JSON object")
+    client_id.require(doc.get("client_id"), "published CIMD document")
     uris = doc.get("redirect_uris") or []
     if not uris:
         raise OAuthProtocolError("CIMD document lists no redirect_uris")
-    return ClientRegistration(client_id=client_id_url, strategy="cimd", issuer=asm.issuer, redirect_uris=tuple(uris))
-
-
-async def dcr_register(
-    http: httpx2.AsyncClient, asm: AuthServerMetadata, redirect_uris: Sequence[str], scopes: Sequence[str]
-) -> ClientRegistration:
-    if not asm.registration_endpoint:
-        raise OAuthProtocolError("server has no registration_endpoint")
-    r = await http.post(
-        asm.registration_endpoint,
-        json={
-            "client_name": "Aurelius",
-            "redirect_uris": list(redirect_uris),
-            "grant_types": ["authorization_code", "refresh_token"],
-            "response_types": ["code"],
-            "token_endpoint_auth_method": "none",
-            "scope": " ".join(scopes),
-        },
-    )
-    if r.status_code not in (200, 201):
-        raise OAuthProtocolError(f"dynamic client registration failed with HTTP {r.status_code}")
-    body = r.json()
-    method = body.get("token_endpoint_auth_method", "none")
-    if method not in ("none", "client_secret_post", "client_secret_basic"):
-        raise OAuthProtocolError(f"registered with unsupported token_endpoint_auth_method {method!r}")
-    if method != "none" and not body.get("client_secret"):
-        raise OAuthProtocolError(f"registered for {method!r} but no client_secret was issued")
-    return ClientRegistration(
-        client_id=body["client_id"],
-        strategy="dcr",
-        issuer=asm.issuer,
-        redirect_uris=tuple(body.get("redirect_uris") or redirect_uris),
-        client_secret=body.get("client_secret"),
-    )
+    return ClientRegistration(client_id=client_id.url, issuer=asm.issuer, redirect_uris=tuple(uris))
 
 
 # --------------------------------------------------------------------------- login (authorization code + PKCE)
@@ -235,8 +227,13 @@ class PendingLogin:
 
 
 def begin_login(
-    meta: OAuthMetadata, client: ClientRegistration, redirect_uri: str, scopes: Sequence[str] = READ_SCOPES
+    meta: OAuthMetadata,
+    client: ClientRegistration,
+    client_id: CimdClientId,
+    redirect_uri: str,
+    scopes: Sequence[str] = READ_SCOPES,
 ) -> PendingLogin:
+    client_id.require(client.client_id, "authorize request")
     if "S256" not in meta.asm.code_challenge_methods_supported:
         raise OAuthProtocolError("authorization server does not support PKCE S256")
     if redirect_uri not in client.redirect_uris:
@@ -246,7 +243,7 @@ def begin_login(
     query = urlencode(
         {
             "response_type": "code",
-            "client_id": client.client_id,
+            "client_id": client_id.url,
             "redirect_uri": redirect_uri,
             "scope": " ".join(scopes),
             "state": state,
@@ -269,12 +266,14 @@ async def complete_login(
     http: httpx2.AsyncClient,
     meta: OAuthMetadata,
     client: ClientRegistration,
+    client_id: CimdClientId,
     pending: PendingLogin,
     callback: Mapping[str, str],
     store: TokenStore,
     clock: Clock = utcnow,
 ) -> AuthState:
     """Validate the redirect, exchange the code, persist client + tokens. Returns the saved state."""
+    client_id.require(client.client_id, "token exchange")
     if "error" in callback:
         raise OAuthProtocolError(f"authorization failed: {callback.get('error')}")
     if not secrets.compare_digest(callback.get("state", "").encode(), pending.state.encode()):
@@ -289,16 +288,15 @@ async def complete_login(
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": pending.redirect_uri,
-        "client_id": client.client_id,
+        "client_id": client_id.url,
         "code_verifier": pending.code_verifier,
         "resource": meta.prm.resource,
     }
-    tokens = await _token_request(http, meta.asm.token_endpoint, client, form, clock, previous=None)
+    tokens = await _token_request(http, meta.asm.token_endpoint, client_id, form, clock, previous=None)
     current = await store.load()
     saved = await store.save(replace(current, client=client, tokens=tokens), expected_version=current.version)
     log.info(
-        "questrade login complete: strategy=%s scope=%r lifetime_s=%d refresh_token=%s",
-        client.strategy,
+        "questrade login complete: scope=%r lifetime_s=%d refresh_token=%s",
         tokens.scope,
         tokens.lifetime_s,
         tokens.refresh_token is not None,
@@ -318,18 +316,15 @@ class _TokenResponse(BaseModel):
 async def _token_request(
     http: httpx2.AsyncClient,
     token_endpoint: str,
-    client: ClientRegistration,
+    client_id: CimdClientId,
     form: dict[str, str],
     clock: Clock,
     previous: TokenSet | None,
 ) -> TokenSet:
-    auth: tuple[str, str] | None = None
-    if client.client_secret:
-        auth = (client.client_id, client.client_secret)
+    """The single path for every token-endpoint call. Public client: no secret, no client auth header."""
+    client_id.require(form.get("client_id"), "token endpoint request")
     try:
-        r = await http.post(
-            token_endpoint, data=form, auth=auth or httpx2.USE_CLIENT_DEFAULT, headers={"Accept": "application/json"}
-        )
+        r = await http.post(token_endpoint, data=form, headers={"Accept": "application/json"})
     except httpx2.HTTPError as e:
         raise AuthExpired(f"token endpoint unreachable: {type(e).__name__}") from None
     if r.status_code != 200:
@@ -373,10 +368,12 @@ class TokenManager:
         http: httpx2.AsyncClient,
         token_endpoint: str,
         resource: str,
+        client_id: CimdClientId,
         *,
         clock: Clock = utcnow,
         skew: timedelta = timedelta(seconds=30),
     ) -> None:
+        self._client_id = client_id
         self._store = store
         self._http = http
         self._token_endpoint = token_endpoint
@@ -421,13 +418,15 @@ class TokenManager:
             if not t.refresh_token:
                 raise ReauthRequired("no refresh token; access token expired")
 
+            # The stored registration must be the configured CIMD client; anything else fails closed.
+            self._client_id.require(state.client.client_id, "refresh (stored client)")
             form = {
                 "grant_type": "refresh_token",
                 "refresh_token": t.refresh_token,
-                "client_id": state.client.client_id,
+                "client_id": self._client_id.url,
                 "resource": self._resource,
             }
-            new = await _token_request(self._http, self._token_endpoint, state.client, form, self._clock, previous=t)
+            new = await _token_request(self._http, self._token_endpoint, self._client_id, form, self._clock, previous=t)
             rotated = new.refresh_token != t.refresh_token
             try:
                 # Durable BEFORE the new access token leaves this method.

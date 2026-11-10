@@ -14,6 +14,10 @@ class OAuthProtocolError(QuestradeError):
     """The authorization server or callback violated the protocol (state/iss mismatch, bad metadata)."""
 
 
+class ClientIdMismatch(OAuthProtocolError):
+    """A request was about to carry a client_id other than the configured CIMD URL. Never sent."""
+
+
 class ReauthRequired(QuestradeError):
     """A human must run `aurelius auth login` again.
 

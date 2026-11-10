@@ -1,9 +1,10 @@
-"""`aurelius` command line. Phase 1 so far: `aurelius auth login|status|refresh`.
+"""`aurelius` command line. Phase 1 so far: `aurelius auth login|status|refresh|genkey`.
 
 Environment:
   AURELIUS_ENCRYPTION_KEY       base64 32-byte key (generate with `aurelius auth genkey`)
+  AURELIUS_CIMD_CLIENT_ID_URL   REQUIRED for login/refresh: https://aurelius.rivenpath.ai/oauth/client-metadata.json
+                                (the permanent CIMD client_id; CIMD is the only sign-in strategy)
   QUESTRADE_MCP_URL             default https://mcp.questrade.com/v1/brokerage/mcp
-  AURELIUS_CIMD_CLIENT_ID_URL   https://<final-domain>/oauth/client-metadata.json (enables CIMD)
   AURELIUS_AUTH_STATE_PATH      encrypted auth state file (dev store until the Postgres store lands)
 """
 
@@ -26,18 +27,18 @@ import httpx2
 from app.crypto import SecretBox, generate_key_b64
 from app.integrations.questrade.auth import (
     READ_SCOPES,
+    CimdClientId,
     TokenManager,
     begin_login,
-    choose_strategy,
     cimd_registration,
     complete_login,
-    dcr_register,
     discover,
 )
 from app.integrations.questrade.errors import QuestradeError
-from app.integrations.questrade.token_store import AuthState, EncryptedFileTokenStore, Strategy, utcnow
+from app.integrations.questrade.token_store import EncryptedFileTokenStore, utcnow
 
 DEFAULT_MCP_URL = "https://mcp.questrade.com/v1/brokerage/mcp"
+CIMD_ENV = "AURELIUS_CIMD_CLIENT_ID_URL"
 LOOPBACK_PORT = 8765
 LOOPBACK_REDIRECT = f"http://127.0.0.1:{LOOPBACK_PORT}/callback"
 DEFAULT_STATE_PATH = Path(__file__).resolve().parents[1] / ".spike" / "auth.enc"
@@ -45,6 +46,20 @@ DEFAULT_STATE_PATH = Path(__file__).resolve().parents[1] / ".spike" / "auth.enc"
 
 def mcp_url() -> str:
     return os.environ.get("QUESTRADE_MCP_URL", DEFAULT_MCP_URL)
+
+
+def configured_client_id() -> CimdClientId:
+    """The CIMD client_id from the environment. Exits with a clear message if missing or invalid."""
+    raw = os.environ.get(CIMD_ENV)
+    if not raw:
+        sys.exit(
+            f"{CIMD_ENV} is not set. Aurelius signs in only with CIMD; set it to the published document URL, e.g.\n"
+            f'  $env:{CIMD_ENV} = "https://aurelius.rivenpath.ai/oauth/client-metadata.json"'
+        )
+    try:
+        return CimdClientId(raw)
+    except ValueError as e:
+        sys.exit(f"{CIMD_ENV}: {e}")
 
 
 def open_store() -> EncryptedFileTokenStore:
@@ -80,35 +95,15 @@ class _Callback(BaseHTTPRequestHandler):
         return
 
 
-async def login(strategy_arg: str, scopes: list[str]) -> None:
+async def login(scopes: list[str]) -> None:
+    client_id = configured_client_id()  # before any network call or store access
     store = open_store()
-    cimd_url = os.environ.get("AURELIUS_CIMD_CLIENT_ID_URL")
     async with httpx2.AsyncClient(timeout=30) as http:
         meta = await discover(http, mcp_url())
-        strategy: Strategy
-        if strategy_arg == "auto":
-            strategy = choose_strategy(meta.asm, cimd_url)
-        elif strategy_arg == "cimd":
-            strategy = "cimd"
-        else:
-            strategy = "dcr"
-        existing = (await store.load()).client
-        if existing is not None and existing.strategy == strategy and existing.issuer == meta.asm.issuer:
-            client = existing  # reuse a DCR registration instead of registering again
-        elif strategy == "cimd":
-            if not cimd_url:
-                sys.exit("CIMD needs AURELIUS_CIMD_CLIENT_ID_URL (the hosted static document).")
-            client = await cimd_registration(http, meta.asm, cimd_url)
-            if existing is not None and existing.strategy == "dcr":
-                print(
-                    f"NOTE: a successful CIMD login replaces the stored DCR client {existing.client_id}. "
-                    "Afterwards, revoke the DCR grant in Questrade (see docs/runbooks/dcr-to-cimd.md)."
-                )
-        else:
-            client = await dcr_register(http, meta.asm, [LOOPBACK_REDIRECT], scopes)
-        print(f"strategy={client.strategy} client_id={client.client_id}")
+        client = await cimd_registration(http, meta.asm, client_id)
+        print(f"client_id={client_id.url}")
 
-        pending = begin_login(meta, client, LOOPBACK_REDIRECT, scopes)
+        pending = begin_login(meta, client, client_id, LOOPBACK_REDIRECT, scopes)
         _Callback.done.clear()
         server = HTTPServer(("127.0.0.1", LOOPBACK_PORT), _Callback)
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -121,7 +116,7 @@ async def login(strategy_arg: str, scopes: list[str]) -> None:
                 sys.exit("Timed out after 10 minutes waiting for the login redirect.")
         finally:
             server.shutdown()
-        state = await complete_login(http, meta, client, pending, _Callback.params, store)
+        state = await complete_login(http, meta, client, client_id, pending, _Callback.params, store)
     assert state.tokens is not None
     print(
         f"Logged in. granted scope: {state.tokens.scope!r}; access lifetime: {int(state.tokens.lifetime_s)}s; "
@@ -136,7 +131,6 @@ async def status() -> None:
         json.dumps(
             {
                 "version": s.version,
-                "strategy": s.client.strategy if s.client else None,
                 "client_id": s.client.client_id if s.client else None,
                 "granted_scope": t.scope if t else None,
                 "has_refresh_token": bool(t and t.refresh_token),
@@ -149,24 +143,12 @@ async def status() -> None:
     )
 
 
-async def forget_dcr(confirmed: bool) -> None:
-    """Delete stored DCR client credentials (and the tokens bound to them). Never touches a CIMD client."""
-    store = open_store()
-    state = await store.load()
-    if state.client is None or state.client.strategy != "dcr":
-        print("No DCR client stored; nothing to delete.")
-        return
-    if not confirmed:
-        sys.exit(f"Would delete DCR client {state.client.client_id} and its tokens. Re-run with --yes.")
-    await store.save(AuthState(), expected_version=state.version)
-    print(f"Deleted DCR client {state.client.client_id} and its tokens from the local store.")
-
-
 async def refresh() -> None:
+    client_id = configured_client_id()
     store = open_store()
     async with httpx2.AsyncClient(timeout=30) as http:
         meta = await discover(http, mcp_url())
-        mgr = TokenManager(store, http, meta.asm.token_endpoint, meta.prm.resource)
+        mgr = TokenManager(store, http, meta.asm.token_endpoint, meta.prm.resource, client_id)
         await mgr.refresh(stale_access_token=None)
     await status()
 
@@ -175,26 +157,21 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="aurelius")
     sub = ap.add_subparsers(dest="group", required=True)
     auth = sub.add_parser("auth").add_subparsers(dest="cmd", required=True)
-    p = auth.add_parser("login")
-    p.add_argument("--strategy", choices=["auto", "cimd", "dcr"], default="auto")
+    p = auth.add_parser("login", help=f"CIMD sign-in; requires {CIMD_ENV}")
     p.add_argument("--scopes", help="space-separated override; default is the read-only set")
     auth.add_parser("status")
     auth.add_parser("refresh")
     auth.add_parser("genkey")
-    p = auth.add_parser("forget-dcr", help="delete stored DCR client credentials and their tokens")
-    p.add_argument("--yes", action="store_true")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "genkey":
             print(generate_key_b64())
         elif a.cmd == "login":
-            asyncio.run(login(a.strategy, a.scopes.split() if a.scopes else list(READ_SCOPES)))
+            asyncio.run(login(a.scopes.split() if a.scopes else list(READ_SCOPES)))
         elif a.cmd == "status":
             asyncio.run(status())
         elif a.cmd == "refresh":
             asyncio.run(refresh())
-        elif a.cmd == "forget-dcr":
-            asyncio.run(forget_dcr(a.yes))
     except QuestradeError as e:
         sys.exit(f"{type(e).__name__}: {e}")
 

@@ -21,21 +21,19 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 from app.crypto import SecretBox
 from app.integrations.questrade.errors import TokenStoreConflict
 
-Strategy = Literal["cimd", "dcr"]
-
 
 @dataclass(frozen=True, slots=True)
 class ClientRegistration:
+    """Aurelius's CIMD client: a public client, so there is no secret. ``client_id`` is the CIMD URL."""
+
     client_id: str
-    strategy: Strategy
     issuer: str
     redirect_uris: tuple[str, ...]
-    client_secret: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,10 +81,8 @@ def state_to_dict(s: AuthState) -> dict[str, Any]:
         if c is None
         else {
             "client_id": c.client_id,
-            "strategy": c.strategy,
             "issuer": c.issuer,
             "redirect_uris": list(c.redirect_uris),
-            "client_secret": c.client_secret,
         },
         "tokens": None
         if t is None
@@ -101,8 +97,14 @@ def state_to_dict(s: AuthState) -> dict[str, Any]:
     }
 
 
+class NonCimdStateError(ValueError):
+    """Stored auth state describes a client that is not a CIMD public client. Refused, never used."""
+
+
 def state_from_dict(d: dict[str, Any]) -> AuthState:
     c, t = d.get("client"), d.get("tokens")
+    if c and (c.get("strategy", "cimd") != "cimd" or c.get("client_secret")):
+        raise NonCimdStateError("stored client is not a CIMD public client; delete the state file and log in again")
     exp = _dt(t["expires_at"]) if t else None
     obt = _dt(t["obtained_at"]) if t else None
     return AuthState(
@@ -111,10 +113,8 @@ def state_from_dict(d: dict[str, Any]) -> AuthState:
         if not c
         else ClientRegistration(
             client_id=c["client_id"],
-            strategy=c["strategy"],
             issuer=c["issuer"],
             redirect_uris=tuple(c["redirect_uris"]),
-            client_secret=c.get("client_secret"),
         ),
         tokens=None
         if not t or exp is None or obt is None

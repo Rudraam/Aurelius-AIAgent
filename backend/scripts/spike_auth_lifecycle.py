@@ -28,7 +28,7 @@ from typing import Any
 import httpx2
 from mcp.client import Client
 
-from app.cli import mcp_url, open_store
+from app.cli import configured_client_id, mcp_url, open_store
 from app.integrations.questrade.auth import TokenManager, discover
 from app.integrations.questrade.transport import read_session
 from app.redaction import GUID_RE, Redactor
@@ -121,7 +121,7 @@ async def token_snapshot(label: str) -> None:
     observe(
         label,
         version=s.version,
-        strategy=s.client.strategy if s.client else None,
+        client_id=s.client.client_id if s.client else None,
         granted_scope=t.scope,
         lifetime_s=int(t.lifetime_s),
         has_refresh_token=bool(t.refresh_token),
@@ -134,7 +134,7 @@ async def with_client(fn: Any) -> Any:
     store = open_store()
     async with httpx2.AsyncClient(timeout=30) as http:
         meta = await discover(http, mcp_url())
-        tokens = TokenManager(store, http, meta.asm.token_endpoint, meta.prm.resource)
+        tokens = TokenManager(store, http, meta.asm.token_endpoint, meta.prm.resource, configured_client_id())
         async with read_session(mcp_url(), tokens) as client:  # read-only session; never an approval session
             return await fn(client)
 
@@ -196,7 +196,9 @@ async def cmd_force_refresh() -> None:
     store = open_store()
     async with httpx2.AsyncClient(timeout=30) as http:
         meta = await discover(http, mcp_url())
-        await TokenManager(store, http, meta.asm.token_endpoint, meta.prm.resource).refresh(stale_access_token=None)
+        await TokenManager(store, http, meta.asm.token_endpoint, meta.prm.resource, configured_client_id()).refresh(
+            stale_access_token=None
+        )
     await token_snapshot("tokens_after_refresh")
     await cmd_call()
 

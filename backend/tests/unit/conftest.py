@@ -4,13 +4,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.integrations.questrade.auth import AuthServerMetadata, OAuthMetadata, ProtectedResourceMetadata
+from app.integrations.questrade.auth import AuthServerMetadata, CimdClientId, OAuthMetadata, ProtectedResourceMetadata
 from app.integrations.questrade.token_store import AuthState, ClientRegistration, InMemoryTokenStore, TokenSet
 
 MCP_URL = "https://mcp.example.test/v1/brokerage/mcp"
 ISSUER = "https://login.example.test"
 TOKEN_URL = f"{ISSUER}/connect/token"
 CIMD_URL = "https://aurelius.example.test/oauth/client-metadata.json"
+CLIENT_ID = CimdClientId(CIMD_URL)
 REDIRECT = "http://127.0.0.1:8765/callback"
 
 
@@ -38,7 +39,6 @@ def meta() -> OAuthMetadata:
             issuer=ISSUER,
             authorization_endpoint=f"{ISSUER}/connect/authorize",
             token_endpoint=TOKEN_URL,
-            registration_endpoint="https://mcp.example.test/connect/register",
             client_id_metadata_document_supported=True,
             code_challenge_methods_supported=["plain", "S256"],
             authorization_response_iss_parameter_supported=True,
@@ -48,7 +48,7 @@ def meta() -> OAuthMetadata:
 
 @pytest.fixture
 def client_reg() -> ClientRegistration:
-    return ClientRegistration(client_id=CIMD_URL, strategy="cimd", issuer=ISSUER, redirect_uris=(REDIRECT,))
+    return ClientRegistration(client_id=CIMD_URL, issuer=ISSUER, redirect_uris=(REDIRECT,))
 
 
 def logged_in_store(clock: FrozenClock, client: ClientRegistration, *, lifetime: int = 1800) -> InMemoryTokenStore:

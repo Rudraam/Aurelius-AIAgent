@@ -22,8 +22,10 @@
 **Decisions (2026-11-09, round 2):**
 1. `httpx2` is the only HTTP stack, and `ca-certificates` goes in the image.
 2. **No 401 retry for approval calls (absolute).** Read and approval auth are split, and the order flow gains `submit_failed`.
-3. The domain is `aurelius.rivenpath.ai`. The CIMD document is rendered, and the migration steps are in `docs/runbooks/dcr-to-cimd.md`.
+3. The domain is `aurelius.rivenpath.ai`. The CIMD document is rendered, and the login steps are in `docs/runbooks/cimd-login.md`.
 4. git init, after a gitleaks check.
+
+**Decisions (2026-11-09, round 3):** DCR is removed entirely: the code, `forget-dcr`, `--strategy`. CIMD is the only strategy, and every authorize, token and refresh request must carry exactly the configured CIMD URL as `client_id` (`tests/unit/test_client_id_invariant.py`). The runbook is now `docs/runbooks/cimd-login.md`.
 
 See `CLAUDE.md`.
 
@@ -63,7 +65,9 @@ See `CLAUDE.md`.
 > - The planned paired probe (our `client_id` vs a bogus one) was skipped: it would have sent requests under Claude Code's identity, and no result could change the decision.
 > - **Strategy: CIMD only.** The interim host is GitHub Pages (`Rudraam/aurelius-oauth`) on `aurelius.rivenpath.ai`; it moves to the VM's Caddy later at the same, permanent URL.
 
-**Recommendation: CIMD for production, with DCR as the fallback. Use DCR first to prove the lifecycle quickly, because it needs no domain.**
+*The analysis below predates the finding above and is kept for the record; the DCR parts are superseded.*
+
+**Original recommendation: CIMD for production, with DCR as the fallback. Use DCR first to prove the lifecycle quickly, because it needs no domain.**
 
 - **CIMD:** Questrade documents CIMD as the path for new clients. Aurelius keeps no server-side registration state, and the client identity is a URL Rudra controls. Two risks remain:
   - Many authorization servers only accept CIMD documents from **allowlisted hosts**. Questrade names only Claude, ChatGPT, VS Code and Codex, so `aurelius.<domain>` may be rejected. That can only be found out empirically.
@@ -81,7 +85,7 @@ See `CLAUDE.md`.
 ## 4a. As built (after the decisions)
 
 `backend/app/integrations/questrade/`:
-- `auth.py`: discovery, `choose_strategy`, CIMD verification, DCR, hand-rolled login (`begin_login`/`complete_login`), and `TokenManager` (single-flight refresh, persist-before-use, `min_remaining`). It also holds the two auth classes:
+- `auth.py`: discovery, CIMD client identity (`CimdClientId`, `cimd_registration`; DCR removed in round 3), hand-rolled login (`begin_login`/`complete_login`), and `TokenManager` (single-flight refresh, persist-before-use, `min_remaining`). It also holds the two auth classes:
   - `ReadBearerAuth`: refreshes and resends once, only on a 401 with `error="invalid_token"`.
   - `ApprovalBearerAuth`: refreshes first if less than 5 minutes remain, and never resends; a 401 raises `AuthExpired`.
 - `token_store.py`: the `TokenStore` protocol (CAS `version` + `refresh_lock()`), an in-memory store, and an AES-GCM file store for dev.
@@ -192,10 +196,8 @@ Run this in PowerShell from `D:\Aurelius\backend`. When Questrade's consent scre
 
 ```powershell
 $env:AURELIUS_ENCRYPTION_KEY = (uv run aurelius auth genkey)
-# CIMD (preferred) once the domain serves the static document:
-#   uv run python scripts/render_cimd.py --domain <final-domain>   # then deploy Caddy
-#   $env:AURELIUS_CIMD_CLIENT_ID_URL = "https://<final-domain>/oauth/client-metadata.json"
-# Without that variable, `auto` falls back to DCR (allowed: registration_endpoint is published).
+# CIMD is the only strategy (round 3). Publish the document first: docs/runbooks/cimd-login.md
+$env:AURELIUS_CIMD_CLIENT_ID_URL = "https://aurelius.rivenpath.ai/oauth/client-metadata.json"
 uv run aurelius auth login                                   # browser login, read scopes only
 uv run python scripts/spike_auth_lifecycle.py call           # new process, headless list_accounts
 uv run python scripts/spike_auth_lifecycle.py force-refresh  # records lifetime and rotation
