@@ -1,7 +1,20 @@
 # Aurelius: conventions for Claude Code
 
 Single-user personal finance agent for Rudra (Ontario). Phase 1 is the Questrade MCP brokerage layer.
-The full spec is in `AURELIUS_PHASE1.md`. Spike findings are in `docs/spikes/` and runbooks in `docs/runbooks/`. This code touches a real brokerage account.
+The Phase 1 spec (`AURELIUS_PHASE1.md`) is not committed yet. Spike findings are in `docs/spikes/` and runbooks in `docs/runbooks/`. This code touches a real brokerage account.
+
+## Repository layout (monorepo, also in README.md)
+
+- `backend/`: the FastAPI service (Python 3.12, uv). All Python code, tests and scripts live here.
+- `mobile/`: the Expo app. **Reserved; do not create it until its phase starts.** Add shared TypeScript packages only when the mobile app needs them.
+- `deploy/`: deployment. `deploy/static/` holds the **only publicly served files** (allowlist enforced by `tests/unit/test_publish_guard.py` and by `pages.yml`). Docker compose and the Caddyfile belong here; the Caddyfile is still at the repo root and moves with compose in M1.
+- `docs/`: specs, spikes (`docs/spikes/`) and runbooks (`docs/runbooks/`).
+- `.github/workflows/`:
+  - `ci.yml`: gitleaks always; ruff, mypy and pytest when `backend/` or shared config changes; never live tests.
+  - `pages.yml`: deploys exactly `deploy/static` to GitHub Pages.
+  - Every action is pinned to a full commit SHA with a `# vX.Y.Z` comment, and permissions are granted per job, with `permissions: {}` at the top.
+- `.githooks/`: the gitleaks pre-commit hook.
+- Don't move existing code to match the layout; place new code by it.
 
 ## The repository is PUBLIC (github.com/Rudraam/Aurelius-AIAgent)
 
