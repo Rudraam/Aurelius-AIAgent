@@ -77,7 +77,7 @@ The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (
    - **Exchange sessions** come from `app/domain/exchange_calendar.py`, which reads the generated `app/domain/data/exchange_sessions.json`. That file covers XTSE and XNYS, holidays and early closes, in Toronto wall-clock time.
      - `is_regular_session(instant, exchange)` and `check_order_timing(order_type, instant, exchange)` require the exchange.
      - A date outside coverage raises `CalendarNotCovered`. Market orders then get `CALENDAR_NOT_COVERED` (fail closed).
-     - The exchange comes from `exchange_for(symbol, listingMarket)`: TSX → XTSE, NASDAQ/NYSE → XNYS, with `.TO` cross-checked. Anything else raises `UnknownExchange`.
+     - The exchange comes from `exchange_for(symbol, listingMarket)`: TSX → XTSE, NASDAQ/NYSE → XNYS, with `.TO` cross-checked. Anything else raises `UnknownExchange`. `"NYSE"` is mapped by analogy (accepted 2026-11-10; TSX and NASDAQ were observed live): confirm it against a real NYSE listing in M3.
      - Regenerate the file with `uv run python scripts/generate_exchange_calendars.py`. Never hand-edit it; a test compares it with the generator.
      - `tests/unit/test_exchange_calendar.py` fails once fewer than 90 days of coverage remain (coverage currently ends 2027-12-31).
      - `exchange_calendars` (and so pandas) is **dev-only**. `app/` must never import it; a test checks this, and the image has no dev group.
