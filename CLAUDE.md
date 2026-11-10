@@ -85,7 +85,7 @@ The full spec is in `AURELIUS_PHASE1.md`. Spike findings are in `docs/spikes/` a
 - `tests/deploy/` runs the real Caddyfile in `caddy:2.10.2` (marker `docker`, skipped without Docker). Static files mount at `/srv/static`; docker-compose must use the same path.
 - Windows Python has no IANA tz database, so `tzdata` is a runtime dependency (approved 2026-11-09). Without it, `market_time` fails at import, which is deliberate.
 - APScheduler 3.x (`AsyncIOScheduler`) ships no type information, so it has a mypy override in `pyproject.toml`. Build triggers with `timezone=TORONTO` (`app/jobs/schedules.py`).
-- A permissions deny list in `.claude/settings.json` blocks `git checkout --`, `git restore`, `git reset --hard`, `git clean` and `git stash drop`/`clear`, for both the Bash and PowerShell tools.
+- A permissions deny list in `.claude/settings.json` (47 patterns, each as both a `Bash(...)` and a `PowerShell(...)` rule) blocks: **all** `git checkout`, so use `git switch` for branch changes; `git restore`; `git reset --hard`; `git clean`; `git stash drop`/`clear`; `git switch --discard-changes`/`-f`/`--force`/`-C`; force pushes (`--force`, `-f`, `--force-with-lease`, with the flag before or after the remote, and `+refspec`); `git branch -D`; and the `git -C` forms of all of these. Each family was verified with harmless probes. Regenerate the file from a single pattern list mirrored to both tools rather than editing it by hand.
 - Mutation-check new safety tests by editing a byte copy and restoring from it. Never use `git checkout --` on files with uncommitted work.
 
 ## Working conventions
