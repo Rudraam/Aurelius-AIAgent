@@ -11,7 +11,8 @@
 | 0.3 Choose strategy | ✅ Provisional | Both CIMD and DCR are advertised. See §3. |
 | 0.4 Lifecycle | ⏸ Code ready, tested against fakes | `uv run aurelius auth login`, then `scripts/spike_auth_lifecycle.py`. It needs one browser login. |
 | SDK API check | ✅ Done | `mcp==2.3.0` source read. It has four gaps that matter for us (§4). |
-| Decision 4: are order tools visible under a read-only token? | ⏸ Waiting on Rudra | `spike_auth_lifecycle.py fixtures` records the `order_tools_under_read_scope` observation from `tools/list` alone. It calls no preview or create tool. |
+| 0.1 / Decision 4 (2026-11-10) | ✅ Partly, via Claude Code | 5 read calls in Rudra's Claude Code session: market data observed; `list_accounts` says "no active account". All 11 listed write tools are visible. See `questrade-tools.md`. |
+| Decision 4: are order tools visible under a read-only token? (original plan) | ⏸ Waiting on Rudra | `spike_auth_lifecycle.py fixtures` records the `order_tools_under_read_scope` observation from `tools/list` alone. It calls no preview or create tool. |
 
 **Decisions (2026-11-09, round 1):**
 1. CIMD first, served as a static file, with a permanent client_id URL. DCR is a fallback, allowed because `registration_endpoint` is published.
@@ -26,6 +27,13 @@
 4. git init, after a gitleaks check.
 
 **Decisions (2026-11-09, round 3):** DCR is removed entirely: the code, `forget-dcr`, `--strategy`. CIMD is the only strategy, and every authorize, token and refresh request must carry exactly the configured CIMD URL as `client_id` (`tests/unit/test_client_id_invariant.py`). The runbook is now `docs/runbooks/cimd-login.md`.
+
+**Result (2026-11-10): CIMD login refused, and the cause is a client allowlist rather than the account.**
+- Rudra's `aurelius auth login` with the CIMD client_id failed at Questrade.
+- On the same day, Rudra's own Claude Code `/mcp` login to the same server (`questrade`, `https://mcp.questrade.com`) succeeded and listed **33 tools**. So the account is eligible for MCP access and the consent flow works.
+- Conclusion: Questrade accepts only allowlisted clients (pre-registered ones such as Claude Code, plus CIMD hosts it has approved). `aurelius.rivenpath.ai` is not on that list.
+- Consequence: the Aurelius backend cannot be an MCP client for now. The CIMD code and document stay **dormant but intact**, pending an allowlist request to Questrade. Nothing is removed, and the client_id invariant still holds.
+- The tool observations moved to the Claude Code session, under `.claude/settings.json` denies for every mutating tool. See `docs/spikes/questrade-tools.md`.
 
 See `CLAUDE.md`.
 
@@ -209,4 +217,4 @@ uv run python scripts/spike_auth_lifecycle.py probe --stale
 uv run python scripts/spike_auth_lifecycle.py call           # restart-after-expiry: should refresh, not ask for login
 ```
 
-Keep the same `$env:AURELIUS_ENCRYPTION_KEY` for the whole session; tokens encrypted with one key cannot be read with another. If Questrade rejects the CIMD client_id (host not allowlisted), the error page or the `authorization failed: …` message is the evidence. Rerun with `--strategy dcr`. Results go to `backend/.spike/observations.jsonl`, which contains no token values. Send me that file and I will fill in §5–6. Look over `backend/tests/fixtures/questrade/*.json` for anything personal before it is ever committed.
+Keep the same `$env:AURELIUS_ENCRYPTION_KEY` for the whole session; tokens encrypted with one key cannot be read with another. If Questrade rejects the CIMD client_id (host not allowlisted), the error page or the `authorization failed: …` message is the evidence (this happened on 2026-11-10, see §1; there is no DCR fallback). Results go to `backend/.spike/observations.jsonl`, which contains no token values. Send me that file and I will fill in §5–6. Look over `backend/tests/fixtures/questrade/*.json` for anything personal before it is ever committed.
