@@ -156,6 +156,7 @@ Never weaken one of these to make a test pass; stop and explain instead.
 - APScheduler 3.x (`AsyncIOScheduler`) ships no type information, so it has a mypy override in `pyproject.toml`. Build triggers with `timezone=TORONTO` (`app/jobs/schedules.py`).
 - A permissions deny list in `.claude/settings.json` (47 git and 8 gh patterns, each as both a `Bash(...)` and a `PowerShell(...)` rule, plus the Questrade MCP denies above) blocks: **all** `git checkout`, so use `git switch` for branch changes; `git restore`; `git reset --hard`; `git clean`; `git stash drop`/`clear`; `git switch --discard-changes`/`-f`/`--force`/`-C`; force pushes (`--force`, `-f`, `--force-with-lease`, with the flag before or after the remote, and `+refspec`); `git branch -D`; and the `git -C` forms of all of these. Each family was verified with harmless probes. Regenerate the file from a single pattern list mirrored to both tools rather than editing it by hand.
 - Mutation-check new safety tests by editing a byte copy and restoring from it. Never use `git checkout --` on files with uncommitted work.
+- **Break-tests run only on a temporary copy, never in the repo.** An interrupted run once left a mutation in `app/ledger` (2026-11-10). Use `backend/scripts/break_test.py`. It refuses to start unless its working directory is inside the system temp dir, has no `.git` in it or above it, and looks like a backend copy (`tests/unit/test_break_test_guard.py`). Add a `Mutation` for every new safety test, and see the script's docstring for usage.
 
 ## Working conventions
 
