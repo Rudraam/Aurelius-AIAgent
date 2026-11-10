@@ -1,7 +1,7 @@
 # Aurelius: conventions for Claude Code
 
 Single-user personal finance agent for Rudra (Ontario). Phase 1 is the Questrade MCP brokerage layer.
-The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (A1 to A12, at the top) wins over the original text below it**, and this file wins over both. When a decision supersedes the spec, add an amendment row with the commit ref. Spike findings are in `docs/spikes/` and runbooks in `docs/runbooks/`. This code touches a real brokerage account.
+The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (A1 to A15, at the top, followed by the revised milestone plan) wins over the original text below it**, and this file wins over both. When a decision supersedes the spec, add an amendment row with the commit ref. Spike findings are in `docs/spikes/` and runbooks in `docs/runbooks/`. This code touches a real brokerage account.
 
 ## Repository layout (monorepo, also in README.md)
 
