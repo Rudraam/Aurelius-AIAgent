@@ -134,6 +134,11 @@ The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (
   - `uv run pytest`
 - Docker: `docker build -t aurelius-api:dev backend/`. Check arm64 with `docker buildx build --platform linux/arm64 --load …`.
 - Ask before adding a dependency that isn't in the spec stack. Approved additions: `httpx2` (it replaces httpx), `tzdata`, and Authlib (approved but unused). APScheduler is in the spec stack.
+- **Supply chain: minimum release age is 14 days, for everything** (Python packages, GitHub Actions, Docker images). Never adopt a version published less than 14 days ago.
+  - uv enforces it: `[tool.uv] exclude-newer = "14 days"` in `backend/pyproject.toml`, recorded in `uv.lock` as `exclude-newer-span = "P14D"`.
+  - Dependabot (`.github/dependabot.yml`) uses `cooldown: default-days: 14`, runs weekly, and groups minor and patch updates (majors come as their own PRs).
+  - Manual pins (actions, Docker images) follow the same rule: check the release date and pick the newest release at least 14 days old. Pin actions to the full commit SHA with a `# vX.Y.Z` comment, and Docker images by `@sha256:` digest.
+  - `tests/unit/test_supply_chain.py` guards the config. Applying the rule on 2026-11-09 moved 14 freshly locked packages back one patch release.
 - Use conventional commits, in small reviewable steps, and commit at every green checkpoint. gitleaks runs in the pre-commit hook. At the end of each milestone, run ruff, mypy and pytest and show the results.
 - **Branch names: lowercase kebab-case, `[a-z0-9-]` only** (e.g. `m1-holiday-calendars`). No slashes, underscores, uppercase or dots. Create and change branches with `git switch` (`git checkout` is denied).
 - When the docs and the server disagree, trust the server and record the difference in `docs/spikes/`.

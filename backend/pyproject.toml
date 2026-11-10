@@ -65,3 +65,7 @@ packages = ["app"]
 # APScheduler 3.x ships no type information.
 module = ["apscheduler", "apscheduler.*"]
 ignore_missing_imports = true
+
+[tool.uv]
+# Supply-chain policy: never resolve a package version uploaded less than 14 days ago.
+exclude-newer = "14 days"

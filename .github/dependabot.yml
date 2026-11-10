@@ -1,0 +1,40 @@
+# Supply-chain policy (CLAUDE.md "Dependencies and supply chain"):
+# - nothing younger than 14 days: Dependabot cooldown here, plus [tool.uv] exclude-newer = "14 days"
+#   in backend/pyproject.toml, so uv itself refuses versions newer than that;
+# - weekly, with minor and patch updates grouped per ecosystem; majors arrive as separate PRs;
+# - actions stay pinned to full commit SHAs, and Dependabot updates the SHA and its "# vX.Y.Z" comment.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Toronto
+    cooldown:
+      default-days: 14
+    groups:
+      actions-minor-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
+    commit-message:
+      prefix: ci
+      include: scope
+
+  - package-ecosystem: uv
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Toronto
+    cooldown:
+      default-days: 14
+    groups:
+      backend-minor-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
+    commit-message:
+      prefix: build
+      include: scope
