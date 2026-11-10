@@ -9,6 +9,7 @@ Skipped when Docker is unavailable.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -39,6 +40,8 @@ def _docker_available() -> bool:
 @pytest.fixture(scope="module")
 def caddy_url() -> Iterator[str]:
     if not _docker_available():
+        if os.environ.get("AURELIUS_REQUIRE_DOCKER") == "1":
+            pytest.fail("docker not available but AURELIUS_REQUIRE_DOCKER=1 (CI must run the deploy tests)")
         pytest.skip("docker not available")
     assert DOCKER is not None
     name = f"aurelius-caddy-test-{uuid.uuid4().hex[:8]}"

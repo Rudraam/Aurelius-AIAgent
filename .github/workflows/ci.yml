@@ -122,6 +122,7 @@ jobs:
         working-directory: backend
     env:
       AURELIUS_LIVE_TESTS: "0"
+      AURELIUS_REQUIRE_DOCKER: "1"  # deploy tests must run here, not skip
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -75,6 +75,10 @@ def test_live_tests_can_never_run_in_ci():
     assert "secrets." not in CI, "CI must not receive any secret (no live credentials can exist there)"
 
 
+def test_ci_requires_docker_tests_to_actually_run():
+    assert 'AURELIUS_REQUIRE_DOCKER: "1"' in job_text("pytest")
+
+
 def test_python_version_comes_from_pyproject_not_the_workflow():
     assert "python-version" not in CI
 
