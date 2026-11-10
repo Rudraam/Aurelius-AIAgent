@@ -89,7 +89,7 @@ Their input schemas were not recorded. A denied tool's schema can't be loaded in
 ## 5. Gap found in `app/redaction.Redactor`
 
 Redacting these market-data responses showed two problems:
-- Every 7–10 digit **integer** is masked as an account number. So `volume: 1234567` became `"****4567"`, and `sharesOutstanding` and `averageVolume20Days` were changed too. That makes the value a string and corrupts the fixture.
+- Every 7–10 digit **integer** is masked as an account number. So a 7-digit `volume` became the string `"****"` plus its last 4 digits, and `sharesOutstanding` and `averageVolume20Days` were changed too. That makes the value a string and corrupts the fixture.
 - The `amount` key rule rounded `totalReturn.amount` (public price data) to `-40.0`.
 
 Account data was not affected. The fix is key-aware exemptions for market-data integer fields (`volume`, `*Size`, `sharesOutstanding`, `averageVolume*`, `marketCapitalization`) and for price-derived amounts, with tests. Nothing is promoted until that fix is in and Rudra approves.
