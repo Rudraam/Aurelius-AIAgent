@@ -42,8 +42,8 @@ jobs:
           fi
           changed="$(git diff --name-only "$BASE" "$HEAD")"
           printf 'changed files:\n%s\n' "$changed"
-          # backend code, plus shared config the backend tests read (deploy/, docs/, workflows, repo config)
-          if printf '%s\n' "$changed" | grep -qE '^(backend/|deploy/|docs/|Caddyfile$|\.github/workflows/|\.gitattributes$|\.gitignore$|\.githooks/)'; then
+          # backend code, plus shared config the backend tests read (deploy/, docs/, workflows, repo config, .claude/ permissions)
+          if printf '%s\n' "$changed" | grep -qE '^(backend/|deploy/|docs/|Caddyfile$|\.github/workflows/|\.gitattributes$|\.gitignore$|\.githooks/|\.claude/)'; then
             echo "backend=true" >> "$GITHUB_OUTPUT"
           else
             echo "backend=false" >> "$GITHUB_OUTPUT"

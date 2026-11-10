@@ -27,6 +27,13 @@
 
 **Decisions (2026-11-09, round 3):** DCR is removed entirely: the code, `forget-dcr`, `--strategy`. CIMD is the only strategy, and every authorize, token and refresh request must carry exactly the configured CIMD URL as `client_id` (`tests/unit/test_client_id_invariant.py`). The runbook is now `docs/runbooks/cimd-login.md`.
 
+**Result (2026-11-10): CIMD login refused, and the cause is a client allowlist rather than the account.**
+- Rudra's `aurelius auth login` with the CIMD client_id failed at Questrade.
+- On the same day, Rudra's own Claude Code `/mcp` login to the same server (`questrade`, `https://mcp.questrade.com`) succeeded and listed **33 tools**. So the account is eligible for MCP access and the consent flow works.
+- Conclusion: Questrade accepts only allowlisted clients (pre-registered ones such as Claude Code, plus CIMD hosts it has approved). `aurelius.rivenpath.ai` is not on that list.
+- Consequence: the Aurelius backend cannot be an MCP client for now. The CIMD code and document stay **dormant but intact**, pending an allowlist request to Questrade. Nothing is removed, and the client_id invariant still holds.
+- The tool observations moved to the Claude Code session, under `.claude/settings.json` denies for every mutating tool. See `docs/spikes/questrade-tools.md`.
+
 See `CLAUDE.md`.
 
 ## 2. What the server advertises (observed)
@@ -209,4 +216,4 @@ uv run python scripts/spike_auth_lifecycle.py probe --stale
 uv run python scripts/spike_auth_lifecycle.py call           # restart-after-expiry: should refresh, not ask for login
 ```
 
-Keep the same `$env:AURELIUS_ENCRYPTION_KEY` for the whole session; tokens encrypted with one key cannot be read with another. If Questrade rejects the CIMD client_id (host not allowlisted), the error page or the `authorization failed: …` message is the evidence. Rerun with `--strategy dcr`. Results go to `backend/.spike/observations.jsonl`, which contains no token values. Send me that file and I will fill in §5–6. Look over `backend/tests/fixtures/questrade/*.json` for anything personal before it is ever committed.
+Keep the same `$env:AURELIUS_ENCRYPTION_KEY` for the whole session; tokens encrypted with one key cannot be read with another. If Questrade rejects the CIMD client_id (host not allowlisted), the error page or the `authorization failed: …` message is the evidence (this happened on 2026-11-10, see §1; there is no DCR fallback). Results go to `backend/.spike/observations.jsonl`, which contains no token values. Send me that file and I will fill in §5–6. Look over `backend/tests/fixtures/questrade/*.json` for anything personal before it is ever committed.

@@ -94,7 +94,19 @@
       "PowerShell(git branch -D*)",
       "PowerShell(git branch * -D*)",
       "PowerShell(git -C * branch -D*)",
-      "PowerShell(git -C * branch * -D*)"
+      "PowerShell(git -C * branch * -D*)",
+      "mcp__questrade__create_order_instruction",
+      "mcp__questrade__create_option_instruction",
+      "mcp__questrade__preview_order_instruction",
+      "mcp__questrade__preview_option_instruction",
+      "mcp__questrade__create_watchlist",
+      "mcp__questrade__edit_watchlist",
+      "mcp__questrade__preview_custom_index",
+      "mcp__questrade__create_custom_index",
+      "mcp__questrade__edit_custom_index",
+      "mcp__questrade__preview_flow",
+      "mcp__questrade__create_flow",
+      "mcp__questrade__update_flow_status"
     ]
   }
 }
