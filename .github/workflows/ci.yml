@@ -1,0 +1,135 @@
+# CI for the monorepo. gitleaks always runs; backend jobs run only when backend/** or shared config
+# changed. Live Questrade tests never run here. Guarded by backend/tests/unit/test_publish_guard.py
+# (pinned SHAs, job-level permissions) and test_ci_workflow.py.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Same digest-pinned image as .githooks/pre-commit.
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.21.2@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: filter
+        name: Did backend or shared config change?
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # No usable base (first push of a branch, force-push): run everything.
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          changed="$(git diff --name-only "$BASE" "$HEAD")"
+          printf 'changed files:\n%s\n' "$changed"
+          # backend code, plus shared config the backend tests read (deploy/, docs/, workflows, repo config)
+          if printf '%s\n' "$changed" | grep -qE '^(backend/|deploy/|docs/|Caddyfile$|\.github/workflows/|\.gitattributes$|\.gitignore$|\.githooks/)'; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  gitleaks:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: gitleaks (full history on main; the PR's commits on pull requests)
+        env:
+          LOG_OPTS: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || '' }}
+        run: |
+          docker run --rm -e LOG_OPTS -v "$GITHUB_WORKSPACE:/repo:ro" --entrypoint sh "$GITLEAKS_IMAGE" -c '
+            git config --global --add safe.directory /repo
+            if [ -n "$LOG_OPTS" ]; then
+              gitleaks git /repo --redact -v --no-banner --log-opts="$LOG_OPTS"
+            else
+              gitleaks git /repo --redact -v --no-banner
+            fi'
+
+  ruff:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --locked
+      - run: uv run ruff check app tests scripts
+      - run: uv run ruff format --check app tests scripts
+
+  mypy:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --locked
+      - run: uv run mypy
+
+  pytest:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      AURELIUS_LIVE_TESTS: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      # uv resolves the interpreter from requires-python in backend/pyproject.toml.
+      - run: uv sync --locked
+      - run: uv run pytest -m "not live" -q
