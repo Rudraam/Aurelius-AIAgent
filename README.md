@@ -54,4 +54,4 @@ uv run aurelius auth login                                       # grant READ pe
 - **Secrets:** tokens are AES-GCM encrypted at rest; tokens, PKCE verifiers and codes are never logged.
 - **Public repo:** gitleaks pre-commit hook and CI; fixture guard tests; GitHub secret scanning and push protection.
 
-`CLAUDE.md` holds the full invariants and conventions; `docs/` holds spikes and runbooks.
+`CLAUDE.md` holds the full invariants and conventions. The Phase 1 spec is [`docs/specs/phase1-questrade.md`](docs/specs/phase1-questrade.md); its Amendments section supersedes the original text.
