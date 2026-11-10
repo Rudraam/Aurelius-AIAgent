@@ -83,6 +83,21 @@ The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (
      - `exchange_calendars` (and so pandas) is **dev-only**. `app/` must never import it; a test checks this, and the image has no dev group.
    - `tests/unit/test_dst.py` covers 2026-11-01 and 2027-03-14 for the maintenance window, market hours, order timing and the APScheduler 16:30 trigger.
 
+## Phase 2 ledger invariants (spec `docs/specs/phase2-ledger.md`; its Decisions table P1-P16 wins over the brief)
+
+Never weaken one of these to make a test pass; stop and explain instead.
+
+1. **Conservation.** Every plan's lines sum exactly to net pay, to the cent. Computed amounts are rounded down to the cent, and the remainder goes to spending.
+2. **The engine is pure.** `app/ledger/engine.allocate(inputs, policy)` does no I/O and no clock, randomness or database access. The same inputs and policy give byte-identical canonical output. Services gather inputs and store results.
+3. **No LLM in the engine.** Every line and notice carries a structured reason code with parameters. Phase 4 turns them into prose; it never computes numbers.
+4. **Approving moves no money.** No broker or bank call in Phase 2.
+5. **Approved plans are immutable.** A revision is a new version linked to the previous one. Events are append-only.
+6. **No tax law in code.** Limits, rates and room are user-entered data with an as-of date and a source note. Calculators take every rate as an input, with no default. A literal scan enforces this.
+7. **Contribution room is a hard ceiling** on every line into a TFSA, FHSA or RRSP account, whichever bucket it comes from. No entry for the payday's calendar year means stale room: zero, plus a notice. Withdrawals never increase remaining room within a year (P9).
+8. **Money is a `Decimal` in whole cents, CAD,** end to end (`app/ledger/money.py`), with `json_decimal` at boundaries. No float anywhere in Phase 2 code.
+9. **Public repo.** Real income, bills, balances and goals never enter git. Tests use fictional numbers. Real config lives in the database and in the git-ignored `backend/.local/`.
+10. **Merges are Rudra's.** Open the PR and report CI; never run `gh pr merge`.
+
 ## Auth design (decisions of 2026-11-09)
 
 - **One HTTP stack: `httpx2`.** The MCP SDK transport, the token endpoint and discovery all use it, and `httpx` is not a dependency.

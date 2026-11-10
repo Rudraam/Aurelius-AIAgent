@@ -5,6 +5,27 @@
 
 ---
 
+## Decisions (2026-11-10). These win over the brief below.
+
+| # | Decision |
+|---|---|
+| P1 | **Milestones.** M1 is the pure engine (dates, policy, waterfall, revision, snapshots, reconciliation and room math, with property and golden tests). M2 is the calculators. M3 is persistence and services (Postgres 16, SQLAlchemy 2 async, Alembic, seed). M4 is the API (FastAPI, bearer auth, RFC 9457). |
+| P2 | **The brief's assumptions were wrong.** There is no FastAPI service, bearer auth, Postgres or `Money` class yet; Phase 2 builds them (M3, M4). "Money" means a CAD `Decimal` validated to whole cents (`app/ledger/money.py`). |
+| P3 | **Dependencies.** hypothesis (dev) and uvicorn (no extras, M4) are approved. The seed file is `seed.toml`, read with stdlib `tomllib`; no YAML library. |
+| P4 | **Rounding.** Every computed amount (a percentage cap, a per-month line converted per pay, a goal or sinking amount per pay) is rounded **down** to the cent. The remainder flows to spending. |
+| P5 | **Per-month budget lines.** The per-pay amount is the monthly amount divided by the number of scheduled paydays in the payday's calendar month, so a three-paycheque month gives one third per pay. |
+| P6 | **Emergency-fund target.** N × the monthly equivalent of **essential** bills (`essential` flag, default true) plus all budget lines. Monthly equivalents: annual ÷ 12, every n months ÷ n, biweekly × 26 ÷ 12, per-pay lines × paydays per year ÷ 12. |
+| P7 | **Sinking funds.** Per pay = (amount − already set aside) ÷ paydays remaining before the due date, counting this one. "Already set aside" is the approved sinking lines since the bill was last due. In the window where it falls due, only the unfunded part is allocated. **Guard:** with zero paydays remaining (for example, due on the payday itself), allocate the full unfunded amount; never divide by zero. |
+| P8 | **Projected balances and reconciliation.** Projected balance = the latest balance entry plus approved plan lines into that account dated after it (approved transfers are assumed to have been made). When a new balance entry arrives, record the drift (actual − projected): it is reported in `/ledger/summary` and stored as an append-only record. Projection then starts from the actual balance. |
+| P9 | **Contribution room.** Remaining room = the user-entered room for the year − contributions dated on or after its as-of date in that year. Contributions are approved plan lines plus optional manual contribution entries for transfers made outside Aurelius. **Withdrawals never increase remaining room within a calendar year, for any account type.** Room changes only through user-entered annual figures. |
+| P10 | **Goals.** A goal with no target date gets the policy's fixed undated per-pay amount (possibly zero). A goal past its date is flagged and keeps receiving its remaining amount (capped by the policy, if it sets a cap) until done or cancelled. |
+| P11 | **Shortfall order.** Critical bills first (autopay, or the user-set `critical` flag), then the rest. Each group is in due-date order. The first bill that doesn't fit gets a partial line, every uncovered amount is listed, and essentials and buckets 3–8 get 0. |
+| P12 | **Long-term investing** has a per-pay limit set by the policy, as a fixed amount or a percentage of net pay. |
+| P13 | **Semimonthly pay** uses two configured days of the month (default: the 15th and the last day). |
+| P14 | **Currency.** Allocation is CAD only. USD accounts may hold balances but are never allocation targets. |
+| P15 | **DST.** Pure date math has no DST. DST tests apply where the service turns "now" into a Toronto date (M3), around 2026-11-01 and 2027-03-14. |
+| P16 | **Merges.** Rudra merges every PR himself. Claude Code opens the PR and reports CI. |
+
 ## 0. Where this fits
 
 | Phase | Scope | Status |

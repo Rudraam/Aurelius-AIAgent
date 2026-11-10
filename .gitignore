@@ -40,3 +40,6 @@ build/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Phase 2: Rudra's real seed and config. Never commit.
+backend/.local/
