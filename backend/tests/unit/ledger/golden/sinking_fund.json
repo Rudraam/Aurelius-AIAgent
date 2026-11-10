@@ -1,0 +1,262 @@
+{
+  "inputs_hash": "f43a5fae90c381be306845bd03785523940134d19e2c485b161aae8de777639a",
+  "lines": [
+    {
+      "account_id": null,
+      "amount": "54.54",
+      "bucket": "bills",
+      "line_id": "bill:insurance:2027-06-01",
+      "overridden_from": null,
+      "reason": {
+        "code": "sinking_fund",
+        "params": [
+          [
+            "bill_id",
+            "insurance"
+          ],
+          [
+            "due_date",
+            "2027-06-01"
+          ],
+          [
+            "paydays_remaining",
+            "11"
+          ],
+          [
+            "unfunded",
+            "600.00"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": null,
+      "amount": "200.00",
+      "bucket": "essentials",
+      "line_id": "essential:groceries",
+      "overridden_from": null,
+      "reason": {
+        "code": "budget_line",
+        "params": [
+          [
+            "basis",
+            "per_month"
+          ],
+          [
+            "budget_line_id",
+            "groceries"
+          ],
+          [
+            "paydays_in_month",
+            "2"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": null,
+      "amount": "60.00",
+      "bucket": "essentials",
+      "line_id": "essential:transit",
+      "overridden_from": null,
+      "reason": {
+        "code": "budget_line",
+        "params": [
+          [
+            "basis",
+            "per_pay"
+          ],
+          [
+            "budget_line_id",
+            "transit"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": "chq",
+      "amount": "200.00",
+      "bucket": "buffer",
+      "line_id": "buffer:chq",
+      "overridden_from": null,
+      "reason": {
+        "code": "buffer_top_up",
+        "params": [
+          [
+            "projected_balance",
+            "300.00"
+          ],
+          [
+            "target",
+            "500.00"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": "hisa",
+      "amount": "200.00",
+      "bucket": "emergency_fund",
+      "line_id": "emergency_fund:hisa",
+      "overridden_from": null,
+      "reason": {
+        "code": "emergency_fund",
+        "params": [
+          [
+            "monthly_essentials",
+            "580.00"
+          ],
+          [
+            "months",
+            "3"
+          ],
+          [
+            "per_pay_cap",
+            "200.00"
+          ],
+          [
+            "projected_balance",
+            "1000.00"
+          ],
+          [
+            "target",
+            "1740.00"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": "hisa",
+      "amount": "92.30",
+      "bucket": "goals",
+      "line_id": "goal:trip",
+      "overridden_from": null,
+      "reason": {
+        "code": "goal_on_track",
+        "params": [
+          [
+            "goal_id",
+            "trip"
+          ],
+          [
+            "outstanding",
+            "1200.00"
+          ],
+          [
+            "paydays_remaining",
+            "13"
+          ],
+          [
+            "target_date",
+            "2027-06-30"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": "tfsa",
+      "amount": "150.00",
+      "bucket": "investing",
+      "line_id": "investing:tfsa",
+      "overridden_from": null,
+      "reason": {
+        "code": "investing",
+        "params": [
+          [
+            "account_kind",
+            "tfsa"
+          ],
+          [
+            "per_pay_limit",
+            "300.00"
+          ],
+          [
+            "room_before",
+            "150.00"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": "fhsa",
+      "amount": "150.00",
+      "bucket": "investing",
+      "line_id": "investing:fhsa",
+      "overridden_from": null,
+      "reason": {
+        "code": "investing",
+        "params": [
+          [
+            "account_kind",
+            "fhsa"
+          ],
+          [
+            "per_pay_limit",
+            "300.00"
+          ],
+          [
+            "room_before",
+            "1000.00"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": "nonreg",
+      "amount": "0.00",
+      "bucket": "investing",
+      "line_id": "investing:nonreg",
+      "overridden_from": null,
+      "reason": {
+        "code": "investing",
+        "params": [
+          [
+            "account_kind",
+            "non_registered"
+          ],
+          [
+            "per_pay_limit",
+            "300.00"
+          ],
+          [
+            "room_before",
+            "n/a"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": "explore",
+      "amount": "40.00",
+      "bucket": "explore",
+      "line_id": "explore:explore",
+      "overridden_from": null,
+      "reason": {
+        "code": "explore",
+        "params": [
+          [
+            "percent",
+            "2"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": null,
+      "amount": "853.16",
+      "bucket": "spending",
+      "line_id": "spending",
+      "overridden_from": null,
+      "reason": {
+        "code": "spending_remainder",
+        "params": []
+      }
+    }
+  ],
+  "net_pay": "2000.00",
+  "next_payday": "2027-01-22",
+  "notices": [],
+  "payday": "2027-01-08",
+  "policy_version": 1,
+  "status": "ok"
+}
