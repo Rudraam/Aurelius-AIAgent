@@ -1,0 +1,321 @@
+{
+  "inputs_hash": "38d2ab5de3494ad4b33e6540331732a2af47898e574e9e470f73764c2eaa294c",
+  "lines": [
+    {
+      "account_id": null,
+      "amount": "300.00",
+      "bucket": "bills",
+      "line_id": "bill:loan:2027-01-20",
+      "overridden_from": null,
+      "reason": {
+        "code": "bill_due_in_window",
+        "params": [
+          [
+            "bill_id",
+            "loan"
+          ],
+          [
+            "due_date",
+            "2027-01-20"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": null,
+      "amount": "200.00",
+      "bucket": "bills",
+      "line_id": "bill:utilities:2027-01-10",
+      "overridden_from": null,
+      "reason": {
+        "code": "bill_due_in_window",
+        "params": [
+          [
+            "bill_id",
+            "utilities"
+          ],
+          [
+            "due_date",
+            "2027-01-10"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": null,
+      "amount": "0.00",
+      "bucket": "essentials",
+      "line_id": "essential:groceries",
+      "overridden_from": null,
+      "reason": {
+        "code": "budget_line",
+        "params": [
+          [
+            "basis",
+            "per_month"
+          ],
+          [
+            "budget_line_id",
+            "groceries"
+          ],
+          [
+            "paydays_in_month",
+            "2"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": null,
+      "amount": "0.00",
+      "bucket": "essentials",
+      "line_id": "essential:transit",
+      "overridden_from": null,
+      "reason": {
+        "code": "budget_line",
+        "params": [
+          [
+            "basis",
+            "per_pay"
+          ],
+          [
+            "budget_line_id",
+            "transit"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": "chq",
+      "amount": "0.00",
+      "bucket": "buffer",
+      "line_id": "buffer:chq",
+      "overridden_from": null,
+      "reason": {
+        "code": "buffer_top_up",
+        "params": [
+          [
+            "projected_balance",
+            "300.00"
+          ],
+          [
+            "target",
+            "500.00"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": "hisa",
+      "amount": "0.00",
+      "bucket": "emergency_fund",
+      "line_id": "emergency_fund:hisa",
+      "overridden_from": null,
+      "reason": {
+        "code": "emergency_fund",
+        "params": [
+          [
+            "monthly_essentials",
+            "1230.00"
+          ],
+          [
+            "months",
+            "3"
+          ],
+          [
+            "per_pay_cap",
+            "50.00"
+          ],
+          [
+            "projected_balance",
+            "1000.00"
+          ],
+          [
+            "target",
+            "3690.00"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": "hisa",
+      "amount": "0.00",
+      "bucket": "goals",
+      "line_id": "goal:trip",
+      "overridden_from": null,
+      "reason": {
+        "code": "goal_on_track",
+        "params": [
+          [
+            "goal_id",
+            "trip"
+          ],
+          [
+            "outstanding",
+            "1200.00"
+          ],
+          [
+            "paydays_remaining",
+            "13"
+          ],
+          [
+            "target_date",
+            "2027-06-30"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": "tfsa",
+      "amount": "0.00",
+      "bucket": "investing",
+      "line_id": "investing:tfsa",
+      "overridden_from": null,
+      "reason": {
+        "code": "investing",
+        "params": [
+          [
+            "account_kind",
+            "tfsa"
+          ],
+          [
+            "per_pay_limit",
+            "300.00"
+          ],
+          [
+            "room_before",
+            "150.00"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": "fhsa",
+      "amount": "0.00",
+      "bucket": "investing",
+      "line_id": "investing:fhsa",
+      "overridden_from": null,
+      "reason": {
+        "code": "investing",
+        "params": [
+          [
+            "account_kind",
+            "fhsa"
+          ],
+          [
+            "per_pay_limit",
+            "300.00"
+          ],
+          [
+            "room_before",
+            "1000.00"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": "nonreg",
+      "amount": "0.00",
+      "bucket": "investing",
+      "line_id": "investing:nonreg",
+      "overridden_from": null,
+      "reason": {
+        "code": "investing",
+        "params": [
+          [
+            "account_kind",
+            "non_registered"
+          ],
+          [
+            "per_pay_limit",
+            "300.00"
+          ],
+          [
+            "room_before",
+            "n/a"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": "explore",
+      "amount": "0.00",
+      "bucket": "explore",
+      "line_id": "explore:explore",
+      "overridden_from": null,
+      "reason": {
+        "code": "explore",
+        "params": [
+          [
+            "percent",
+            "2"
+          ]
+        ]
+      }
+    },
+    {
+      "account_id": null,
+      "amount": "0.00",
+      "bucket": "spending",
+      "line_id": "spending",
+      "overridden_from": null,
+      "reason": {
+        "code": "spending_remainder",
+        "params": []
+      }
+    }
+  ],
+  "net_pay": "500.00",
+  "next_payday": "2027-01-22",
+  "notices": [
+    {
+      "code": "pay_differs_from_expected",
+      "params": [
+        [
+          "actual",
+          "500.00"
+        ],
+        [
+          "difference",
+          "-1500.00"
+        ],
+        [
+          "expected",
+          "2000.00"
+        ]
+      ]
+    },
+    {
+      "code": "bill_uncovered",
+      "params": [
+        [
+          "bill_id",
+          "utilities"
+        ],
+        [
+          "covered",
+          "200.00"
+        ],
+        [
+          "critical",
+          "False"
+        ],
+        [
+          "due_date",
+          "2027-01-10"
+        ],
+        [
+          "needed",
+          "400.00"
+        ],
+        [
+          "short",
+          "200.00"
+        ]
+      ]
+    }
+  ],
+  "payday": "2027-01-08",
+  "policy_version": 1,
+  "status": "shortfall"
+}

@@ -84,6 +84,21 @@ The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (
      - `exchange_calendars` (and so pandas) is **dev-only**. `app/` must never import it; a test checks this, and the image has no dev group.
    - `tests/unit/test_dst.py` covers 2026-11-01 and 2027-03-14 for the maintenance window, market hours, order timing and the APScheduler 16:30 trigger.
 
+## Phase 2 ledger invariants (spec `docs/specs/phase2-ledger.md`; its Decisions table P1-P16 wins over the brief)
+
+Never weaken one of these to make a test pass; stop and explain instead.
+
+1. **Conservation.** Every plan's lines sum exactly to net pay, to the cent. Computed amounts are rounded down to the cent, and the remainder goes to spending.
+2. **The engine is pure.** `app/ledger/engine.allocate(inputs, policy)` does no I/O and no clock, randomness or database access. The same inputs and policy give byte-identical canonical output. Services gather inputs and store results.
+3. **No LLM in the engine.** Every line and notice carries a structured reason code with parameters. Phase 4 turns them into prose; it never computes numbers.
+4. **Approving moves no money.** No broker or bank call in Phase 2.
+5. **Approved plans are immutable.** A revision is a new version linked to the previous one. Events are append-only.
+6. **No tax law in code.** Limits, rates and room are user-entered data with an as-of date and a source note. Calculators take every rate as an input, with no default. A literal scan enforces this.
+7. **Contribution room is a hard ceiling** on every line into a TFSA, FHSA or RRSP account, whichever bucket it comes from. No entry for the payday's calendar year means stale room: zero, plus a notice. Withdrawals never increase remaining room within a year (P9).
+8. **Money is a `Decimal` in whole cents, CAD,** end to end (`app/ledger/money.py`), with `json_decimal` at boundaries. No float anywhere in Phase 2 code.
+9. **Public repo.** Real income, bills, balances and goals never enter git. Tests use fictional numbers. Real config lives in the database and in the git-ignored `backend/.local/`.
+10. **Merges are Rudra's.** Open the PR and report CI; never run `gh pr merge`.
+
 ## Auth design (decisions of 2026-11-09)
 
 - **One HTTP stack: `httpx2`.** The MCP SDK transport, the token endpoint and discovery all use it, and `httpx` is not a dependency.
@@ -142,6 +157,7 @@ The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (
 - APScheduler 3.x (`AsyncIOScheduler`) ships no type information, so it has a mypy override in `pyproject.toml`. Build triggers with `timezone=TORONTO` (`app/jobs/schedules.py`).
 - A permissions deny list in `.claude/settings.json` (47 git and 11 gh patterns, each as both a `Bash(...)` and a `PowerShell(...)` rule, plus the Questrade MCP denies above) blocks: **all** `git checkout`, so use `git switch` for branch changes; `git restore`; `git reset --hard`; `git clean`; `git stash drop`/`clear`; `git switch --discard-changes`/`-f`/`--force`/`-C`; force pushes (`--force`, `-f`, `--force-with-lease`, with the flag before or after the remote, and `+refspec`); `git branch -D`; and the `git -C` forms of all of these. Each family was verified with harmless probes. Regenerate the file from a single pattern list mirrored to both tools rather than editing it by hand.
 - Mutation-check new safety tests by editing a byte copy and restoring from it. Never use `git checkout --` on files with uncommitted work.
+- **Break-tests run only on a temporary copy, never in the repo.** An interrupted run once left a mutation in `app/ledger` (2026-11-10). Use `backend/scripts/break_test.py`. It refuses to start unless its working directory is inside the system temp dir, has no `.git` in it or above it, and looks like a backend copy (`tests/unit/test_break_test_guard.py`). Add a `Mutation` for every new safety test, and see the script's docstring for usage.
 
 ## Working conventions
 

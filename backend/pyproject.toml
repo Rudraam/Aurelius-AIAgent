@@ -25,6 +25,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "exchange-calendars>=4.13.2",
+    "hypothesis>=6.170.12",
 ]
 
 [build-system]
