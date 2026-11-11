@@ -1,28 +1,69 @@
 #!/bin/sh
-# Aurelius pre-commit: gitleaks over the staged changes. The repo is PUBLIC, so this fails closed:
-# if gitleaks can run neither natively nor through Docker, the commit is blocked.
+# Aurelius pre-commit: gitleaks over exactly the changes being committed. The repo is PUBLIC, so this
+# fails closed: if gitleaks can run neither natively nor through Docker, the commit is blocked.
 #
 # Enable once per clone:   git config core.hooksPath .githooks
 # Never bypass with --no-verify.
+#
+# Which index? git tells the hook through GIT_INDEX_FILE. For a plain `git commit` it is .git/index, but
+# `git commit -a` uses .git/index.lock and `git commit -- <path>` uses .git/next-index-*.lock. Docker does
+# not inherit the variable, so the hook snapshots that index and hands the copy to the container
+# explicitly (before 2026-11-10 the container read .git/index and scanned nothing for -a / -- <path>).
+#
+# Fail closed on an empty scan: if the commit adds text lines but gitleaks reports no commit scanned,
+# the scan did not see the change, and the commit is blocked.
 set -eu
 
 IMAGE="ghcr.io/gitleaks/gitleaks:v8.21.2@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46"
 ARGS="git --pre-commit --staged --redact --no-banner -v"
 
-if command -v gitleaks >/dev/null 2>&1; then
-    # shellcheck disable=SC2086
-    exec gitleaks $ARGS .
+block() {
+    echo "pre-commit: BLOCKED. $*" >&2
+    echo "Do not use --no-verify." >&2
+    exit 1
+}
+
+index=${GIT_INDEX_FILE:-$(git rev-parse --git-path index)}
+[ -f "$index" ] || block "index file not found: $index"
+
+# Does the commit add any text lines? (git diff honours GIT_INDEX_FILE.) Deletions, pure renames and
+# binary files add none, and gitleaks legitimately reports 0 commits scanned for them.
+if git diff --cached --numstat | awk '$1 ~ /^[0-9]+$/ && $1 > 0 { found = 1 } END { exit !found }'; then
+    adds=yes
+else
+    adds=no
 fi
 
-if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT INT TERM
+log="$tmp/gitleaks.log"
+
+if command -v gitleaks >/dev/null 2>&1; then
+    # Native gitleaks inherits GIT_INDEX_FILE from git directly.
+    # shellcheck disable=SC2086
+    if gitleaks $ARGS . >"$log" 2>&1; then rc=0; else rc=$?; fi
+elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    mkdir "$tmp/idx"
+    cp "$index" "$tmp/idx/index"
     root=$(git rev-parse --show-toplevel)
+    idx="$tmp/idx"
     if command -v cygpath >/dev/null 2>&1; then
         root=$(cygpath -m "$root")  # Git for Windows: D:/Aurelius, which Docker Desktop understands
+        idx=$(cygpath -m "$idx")
     fi
-    MSYS_NO_PATHCONV=1 exec docker run --rm -v "$root:/repo:ro" --entrypoint sh "$IMAGE" -c \
-        "git config --global --add safe.directory /repo && cd /repo && gitleaks $ARGS ."
+    if MSYS_NO_PATHCONV=1 docker run --rm \
+        -v "$root:/repo:ro" -v "$idx:/idx:ro" -e GIT_INDEX_FILE=/idx/index \
+        --entrypoint sh "$IMAGE" -c \
+        "git config --global --add safe.directory /repo && cd /repo && gitleaks $ARGS ." \
+        >"$log" 2>&1; then rc=0; else rc=$?; fi
+else
+    block "gitleaks is unavailable (no gitleaks binary and Docker is not running). Start Docker Desktop or install gitleaks v8.21.2, then commit again."
 fi
 
-echo "pre-commit: BLOCKED. gitleaks is unavailable (no gitleaks binary and Docker is not running)." >&2
-echo "Start Docker Desktop or install gitleaks v8.21.2, then commit again. Do not use --no-verify." >&2
-exit 1
+cat "$log" >&2
+[ "$rc" -eq 0 ] || exit "$rc"
+
+if [ "$adds" = yes ] && ! grep -Eq '(^|[^0-9])[1-9][0-9]* commits? scanned' "$log"; then
+    block "the commit adds text lines but gitleaks scanned no commit, so it did not see the change."
+fi
+exit 0

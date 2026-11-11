@@ -26,6 +26,9 @@ REQUIRED_GH = frozenset(
         "gh pr merge --admin*",
         "gh pr merge * --admin*",
         "gh ruleset*",
+        "gh alias set*",
+        "gh alias import*",
+        "gh variable*",
     }
 )
 
