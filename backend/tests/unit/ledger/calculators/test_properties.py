@@ -86,10 +86,19 @@ def test_fee_drag_never_helps(
     m=periods,
     p=periods,
     years=st.integers(1, 35),
+    term_offset=st.none() | st.integers(0, 34),
 )
-def test_loan_schedule_is_exact(principal: Decimal, rate: Decimal, m: int, p: int, years: int) -> None:
+def test_loan_schedule_is_exact(
+    principal: Decimal, rate: Decimal, m: int, p: int, years: int, term_offset: int | None
+) -> None:
+    term = None if term_offset is None else max(1, years - term_offset)
     inputs = LoanInputs(
-        principal=principal, annual_rate=rate, compounding_per_year=m, payments_per_year=p, amortization_years=years
+        principal=principal,
+        annual_rate=rate,
+        compounding_per_year=m,
+        payments_per_year=p,
+        amortization_years=years,
+        term_years=term,
     )
     try:
         result = loan_amortization(inputs)
@@ -112,6 +121,17 @@ def test_loan_schedule_is_exact(principal: Decimal, rate: Decimal, m: int, p: in
         opening = principal if previous is None else previous.balance
         assert row.balance == opening - row.principal
     assert all(r.payment == result.payment for r in rows[:-1])
+    if term is None:
+        assert result.term is None
+    else:
+        assert result.term is not None
+        within = rows[: p * term]
+        assert result.term.payments == len(within)
+        assert result.term.balance_at_end == within[-1].balance
+        assert result.term.principal_paid + result.term.balance_at_end == principal
+        assert result.term.interest_paid == sum(r.interest for r in within)
+        if term == years:
+            assert result.term.balance_at_end == ZERO
 
 
 @PROFILE

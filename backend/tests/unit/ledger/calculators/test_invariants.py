@@ -67,6 +67,7 @@ SAMPLES: dict[str, dict[str, Any]] = {
         "compounding_per_year": 12,
         "payments_per_year": 12,
         "amortization_years": 2,
+        "term_years": 1,
     },
     "fi-number": {"annual_expenses": Decimal("40000.00"), "withdrawal_rate": Decimal("4")},
 }

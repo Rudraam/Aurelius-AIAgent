@@ -17,13 +17,20 @@ exactly to ``P``, and ``total_paid = P + total_interest``.
 Interest only falls as the balance falls, so the first row is the worst case: if its rounded interest
 is not below the payment (a tiny loan over many periods, e.g. 2.81 over 408 payments), the loan can't
 amortize in whole cents and ``CalculatorError`` is raised.
+
+**Amortization vs term.** In Canada the *amortization* is how long the loan takes to repay in full;
+the *term* is the length of the contract, after which the loan renews. With the optional
+``term_years`` (at most the amortization), the result also has a ``term`` summary: the first
+``p * term_years`` rows of the same schedule, and the balance left at the end of the term (the renewal
+balance; zero when the term equals the amortization or the loan is repaid early).
 """
 
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from app.ledger.calculators.errors import CalculatorError
 from app.ledger.models import Frozen
@@ -51,6 +58,14 @@ class LoanInputs(Frozen):
     payments_per_year: int = Field(ge=1, le=52)
     #: Years to repay in full (the amortization period, not a mortgage "term").
     amortization_years: int = Field(ge=1, le=100)
+    #: Optional contract term in years (at most the amortization): adds the renewal balance.
+    term_years: int | None = Field(default=None, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def _term_within_amortization(self) -> Self:
+        if self.term_years is not None and self.term_years > self.amortization_years:
+            raise ValueError("term_years must not exceed amortization_years")
+        return self
 
 
 class LoanRow(Frozen):
@@ -61,6 +76,16 @@ class LoanRow(Frozen):
     balance: Decimal
 
 
+class TermSummary(Frozen):
+    term_years: int
+    #: Payments made within the term (fewer if the loan is repaid before the term ends).
+    payments: int
+    principal_paid: Decimal
+    interest_paid: Decimal
+    #: Balance owing at the end of the term: the renewal balance.
+    balance_at_end: Decimal
+
+
 class LoanResult(Frozen):
     #: Effective rate per payment period, in percent, at full precision.
     periodic_rate: Decimal
@@ -69,6 +94,22 @@ class LoanResult(Frozen):
     schedule: tuple[LoanRow, ...]
     total_paid: Decimal
     total_interest: Decimal
+    #: Present only when ``term_years`` was given.
+    term: TermSummary | None = None
+
+
+def _term_summary(inputs: LoanInputs, rows: tuple[LoanRow, ...]) -> TermSummary | None:
+    if inputs.term_years is None:
+        return None
+    within = rows[: inputs.payments_per_year * inputs.term_years]
+    principal_paid = sum((r.principal for r in within), ZERO)
+    return TermSummary(
+        term_years=inputs.term_years,
+        payments=len(within),
+        principal_paid=principal_paid,
+        interest_paid=sum((r.interest for r in within), ZERO),
+        balance_at_end=inputs.principal - principal_paid,
+    )
 
 
 def periodic_rate(annual_percent: Decimal, compounding: int, payments: int) -> Decimal:
@@ -106,11 +147,13 @@ def loan_amortization(inputs: LoanInputs) -> LoanResult:
         balance -= principal
         rows.append(LoanRow(number=number, payment=payment, interest=interest, principal=principal, balance=balance))
     total_interest = sum((r.interest for r in rows), ZERO)
+    schedule = tuple(rows)
     return LoanResult(
         periodic_rate=multiply(i, HUNDRED),
         payment=payment,
         number_of_payments=len(rows),
-        schedule=tuple(rows),
+        schedule=schedule,
         total_paid=inputs.principal + total_interest,
         total_interest=total_interest,
+        term=_term_summary(inputs, schedule),
     )

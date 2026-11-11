@@ -263,6 +263,29 @@ MUTATIONS: tuple[Mutation, ...] = (
         "tests/unit/ledger/calculators/test_reference_cases.py::test_loan_too_small_to_amortize_in_cents_is_refused",
     ),
     Mutation(
+        "calc: loan renewal balance",
+        "app/ledger/calculators/loan.py",
+        "balance_at_end=inputs.principal - principal_paid,",
+        "balance_at_end=inputs.principal - principal_paid - interest_paid,",
+        "tests/unit/ledger/calculators/test_reference_cases.py"
+        "::test_loan_five_year_term_on_25_year_amortization_gives_the_renewal_balance",
+        also=(
+            Edit(
+                "app/ledger/calculators/loan.py",
+                "    principal_paid = sum((r.principal for r in within), ZERO)\n",
+                "    principal_paid = sum((r.principal for r in within), ZERO)\n"
+                "    interest_paid = sum((r.interest for r in within), ZERO)\n",
+            ),
+        ),
+    ),
+    Mutation(
+        "calc: term within amortization",
+        "app/ledger/calculators/loan.py",
+        "if self.term_years is not None and self.term_years > self.amortization_years:",
+        "if False:",
+        "tests/unit/ledger/calculators/test_reference_cases.py::test_loan_term_longer_than_amortization_is_rejected",
+    ),
+    Mutation(
         "calc: goal rounds up",
         "app/ledger/calculators/savings.py",
         "per_pay=ceil_cents(",

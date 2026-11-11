@@ -333,13 +333,14 @@ def test_tfsa_rrsp_one_year() -> None:
 # -- loan / amortization (P22) ---------------------------------------------------------------------
 
 
-def loan(principal: str, rate: str, m: int, p: int, years: int) -> LoanInputs:
+def loan(principal: str, rate: str, m: int, p: int, years: int, term: int | None = None) -> LoanInputs:
     return LoanInputs(
         principal=D(principal),
         annual_rate=D(rate),
         compounding_per_year=m,
         payments_per_year=p,
         amortization_years=years,
+        term_years=term,
     )
 
 
@@ -394,6 +395,38 @@ def test_loan_textbook_us_mortgage_monthly_compounding() -> None:
     assert result.number_of_payments == 360
     assert result.schedule[0].interest == D("1000.00")
     assert result.schedule[-1].payment < result.payment
+
+
+def test_loan_five_year_term_on_25_year_amortization_gives_the_renewal_balance() -> None:
+    # 100,000 at 5% compounded semi-annually, monthly payments of 581.61 (P22), 25-year amortization.
+    # Closed form at 581.61: 100000 (1+i)^60 - 581.61 ((1+i)^60 - 1) / i = 88,507.1666, with
+    # i = 1.025^(1/6) - 1. The cent schedule rounds each row's interest half-up, which drifts by at most
+    # 60 x 0.005 (compounded, < 0.31); the schedule gives 88,507.12.
+    result = loan_amortization(loan("100000.00", "5", 2, 12, 25, term=5))
+    term = result.term
+    assert term is not None
+    assert (term.term_years, term.payments, term.balance_at_end) == (5, 60, D("88507.12"))
+    assert term.balance_at_end == result.schedule[59].balance
+    assert abs(term.balance_at_end - D("88507.17")) < D("0.31")
+    assert term.principal_paid + term.interest_paid == D("581.61") * 60
+    assert term.principal_paid == D("100000.00") - term.balance_at_end
+    assert result.number_of_payments == 300  # the term doesn't change the amortization schedule
+
+
+def test_loan_term_equal_to_amortization_leaves_nothing_to_renew() -> None:
+    result = loan_amortization(loan("100000.00", "5", 2, 12, 25, term=25))
+    assert result.term is not None
+    assert (result.term.payments, result.term.balance_at_end) == (300, D("0.00"))
+    assert (result.term.principal_paid, result.term.interest_paid) == (D("100000.00"), result.total_interest)
+
+
+def test_loan_without_term_has_no_term_summary() -> None:
+    assert loan_amortization(loan("1000.00", "12", 12, 12, 1)).term is None
+
+
+def test_loan_term_longer_than_amortization_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="term_years must not exceed amortization_years"):
+        loan("100000.00", "5", 2, 12, 25, term=26)
 
 
 def test_loan_too_small_to_amortize_in_cents_is_refused() -> None:
