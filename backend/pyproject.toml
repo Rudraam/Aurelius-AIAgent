@@ -13,6 +13,9 @@ dependencies = [
     "pydantic>=2.9,<3",
     "tzdata>=2025.2",
     "apscheduler>=3.11,<4",
+    "sqlalchemy[asyncio]>=2.0,<2.1",
+    "alembic>=1.13,<2",
+    "asyncpg>=0.30",
 ]
 
 [project.scripts]
@@ -57,6 +60,10 @@ ignore = ["S101"]
 # docker CLI driven with constant args from an absolute path (shutil.which)
 "tests/deploy/**" = ["S105", "S106", "S603"]
 "tests/unit/test_supply_chain.py" = ["S603"]
+# docker / Postgres client tools driven with constant args from resolved paths; test SQL built from constants
+"tests/db/**" = ["S105", "S106", "S603", "S608"]
+# pg_dump / pg_restore / docker from resolved absolute paths with fixed arguments (no shell)
+"app/db/backup.py" = ["S603"]
 "scripts/**" = ["T201", "S105"]
 
 [tool.mypy]
