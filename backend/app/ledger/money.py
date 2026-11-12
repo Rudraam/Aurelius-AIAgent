@@ -5,14 +5,18 @@ cents. Pydantic models use the annotated types below, which are *strict*: a floa
 str in Python mode) is rejected outright, so no float can enter the engine.
 
 All arithmetic that can produce sub-cent values (division, percentages) runs under ``ledger_context``
-(34 significant digits, traps on) and is rounded **down** to the cent with ``floor_cents`` (P4).
+(34 significant digits, traps on). Engine allocations are rounded **down** to the cent with
+``floor_cents`` (P4). Calculators (M2) compute at full precision and round only at output: projections
+with ``half_up_cents`` (P21), required savings with ``ceil_cents`` (P23).
 """
 
 from __future__ import annotations
 
 from decimal import (
+    ROUND_CEILING,
     ROUND_FLOOR,
     ROUND_HALF_EVEN,
+    ROUND_HALF_UP,
     Context,
     Decimal,
     DivisionByZero,
@@ -64,6 +68,19 @@ def _check_percent(value: Decimal) -> Decimal:
     return value
 
 
+def _check_positive_percent(value: Decimal) -> Decimal:
+    value = _check_percent(value)
+    if value == 0:
+        raise ValueError("percent must be greater than 0")
+    return value
+
+
+def _check_return_rate(value: Decimal) -> Decimal:
+    if not value.is_finite() or value <= -HUNDRED or value > HUNDRED:
+        raise ValueError(f"annual return must be within (-100, 100], got {value}")
+    return value
+
+
 def _check_positive_decimal(value: Decimal) -> Decimal:
     if not value.is_finite() or value <= 0:
         raise ValueError(f"must be a positive finite decimal, got {value}")
@@ -78,6 +95,10 @@ NonNegativeMoney = Annotated[Decimal, Strict(), AfterValidator(_check_non_negati
 PositiveMoney = Annotated[Decimal, Strict(), AfterValidator(_check_positive)]
 #: A percentage in [0, 100] at any precision.
 Percent = Annotated[Decimal, Strict(), AfterValidator(_check_percent)]
+#: A percentage in (0, 100] (a divisor, e.g. a withdrawal rate).
+PositivePercent = Annotated[Decimal, Strict(), AfterValidator(_check_positive_percent)]
+#: An annual return in percent, within (-100, 100]. Negative returns are allowed.
+ReturnRate = Annotated[Decimal, Strict(), AfterValidator(_check_return_rate)]
 #: A positive decimal at any precision (e.g. emergency-fund months).
 PositiveDecimal = Annotated[Decimal, Strict(), AfterValidator(_check_positive_decimal)]
 
@@ -95,6 +116,18 @@ def floor_cents(value: Decimal) -> Decimal:
         return value.quantize(CENT, rounding=ROUND_FLOOR)
 
 
+def half_up_cents(value: Decimal) -> Decimal:
+    """Round half-up to the cent (P21): 0.005 rounds away from zero."""
+    with localcontext(ledger_context()):
+        return value.quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def ceil_cents(value: Decimal) -> Decimal:
+    """Round up to the cent (P22, P23). Exact for values already in cents."""
+    with localcontext(ledger_context()):
+        return value.quantize(CENT, rounding=ROUND_CEILING)
+
+
 def divide(numerator: Decimal, denominator: Decimal) -> Decimal:
     """Full-precision division under the ledger context. Callers round with ``floor_cents``."""
     with localcontext(ledger_context()):
@@ -104,6 +137,12 @@ def divide(numerator: Decimal, denominator: Decimal) -> Decimal:
 def multiply(a: Decimal, b: Decimal) -> Decimal:
     with localcontext(ledger_context()):
         return a * b
+
+
+def power(base: Decimal, exponent: Decimal | int) -> Decimal:
+    """``base ** exponent`` under the ledger context (correctly rounded to 34 digits)."""
+    with localcontext(ledger_context()):
+        return base ** Decimal(exponent)
 
 
 def percent_of(percent: Decimal, amount: Decimal) -> Decimal:

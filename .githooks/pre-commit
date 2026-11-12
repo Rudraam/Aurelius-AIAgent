@@ -12,8 +12,14 @@
 #
 # Fail closed on an empty scan: if the commit adds text lines but gitleaks reports no commit scanned,
 # the scan did not see the change, and the commit is blocked.
+#
+# Which gitleaks? A local binary is used only if `gitleaks version` reports exactly PINNED_VERSION (the
+# version CI runs), so a local scan never uses different rules from CI. Any other local version is
+# ignored in favour of the pinned Docker image; with neither available, the commit is blocked.
+# Keep PINNED_VERSION, the IMAGE tag and ci.yml in step (tests/unit/test_precommit_hook.py checks).
 set -eu
 
+PINNED_VERSION="8.21.2"
 IMAGE="ghcr.io/gitleaks/gitleaks:v8.21.2@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46"
 ARGS="git --pre-commit --staged --redact --no-banner -v"
 
@@ -38,7 +44,14 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 log="$tmp/gitleaks.log"
 
+# The local binary's version, without a leading "v" or whitespace; empty if there is no binary.
+native_version=""
 if command -v gitleaks >/dev/null 2>&1; then
+    native_version=$(gitleaks version 2>/dev/null | head -n 1 | tr -d '[:space:]' | sed 's/^v//') || native_version="unknown"
+    [ -n "$native_version" ] || native_version="unknown"
+fi
+
+if [ "$native_version" = "$PINNED_VERSION" ]; then
     # Native gitleaks inherits GIT_INDEX_FILE from git directly.
     # shellcheck disable=SC2086
     if gitleaks $ARGS . >"$log" 2>&1; then rc=0; else rc=$?; fi
@@ -51,13 +64,16 @@ elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
         root=$(cygpath -m "$root")  # Git for Windows: D:/Aurelius, which Docker Desktop understands
         idx=$(cygpath -m "$idx")
     fi
+    [ -z "$native_version" ] || echo "pre-commit: local gitleaks is $native_version, not $PINNED_VERSION; using the pinned image." >&2
     if MSYS_NO_PATHCONV=1 docker run --rm \
         -v "$root:/repo:ro" -v "$idx:/idx:ro" -e GIT_INDEX_FILE=/idx/index \
         --entrypoint sh "$IMAGE" -c \
         "git config --global --add safe.directory /repo && cd /repo && gitleaks $ARGS ." \
         >"$log" 2>&1; then rc=0; else rc=$?; fi
+elif [ -n "$native_version" ]; then
+    block "the local gitleaks is version $native_version, not the pinned $PINNED_VERSION, and Docker is not running. Install gitleaks $PINNED_VERSION or start Docker Desktop, then commit again."
 else
-    block "gitleaks is unavailable (no gitleaks binary and Docker is not running). Start Docker Desktop or install gitleaks v8.21.2, then commit again."
+    block "gitleaks is unavailable (no gitleaks binary and Docker is not running). Start Docker Desktop or install gitleaks v$PINNED_VERSION, then commit again."
 fi
 
 cat "$log" >&2

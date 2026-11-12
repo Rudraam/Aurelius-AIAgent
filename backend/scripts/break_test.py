@@ -211,6 +211,94 @@ MUTATIONS: tuple[Mutation, ...] = (
         "            if False:",
         "tests/unit/ledger/test_golden.py::test_revision_with_a_line_override",
     ),
+    # -- calculators (M2) ---------------------------------------------------------------------------
+    Mutation(
+        "calc: rate default",
+        "app/ledger/calculators/loan.py",
+        "    annual_rate: Percent\n",
+        "    annual_rate: Percent = ZERO\n",
+        "tests/unit/ledger/calculators/test_invariants.py::test_every_rate_is_required",
+    ),
+    Mutation(
+        "calc: tax literal scanned",
+        "app/ledger/calculators/registered.py",
+        "    marginal_rate_now: Percent\n",
+        '    marginal_rate_now: Percent = Decimal("33")\n',
+        "tests/unit/ledger/test_invariants.py::test_no_tax_constants",
+    ),
+    Mutation(
+        "calc: floats accepted",  # two layers, as for the engine models
+        "app/ledger/models.py",
+        "frozen=True, strict=True",
+        "frozen=True, strict=False",
+        "tests/unit/ledger/calculators/test_invariants.py::test_rejects_floats_for_every_decimal_input",
+        also=(Edit("app/ledger/money.py", "Strict(), ", "", every=True),),
+    ),
+    Mutation(
+        "calc: half-up rounding",
+        "app/ledger/money.py",
+        "rounding=ROUND_HALF_UP",
+        "rounding=ROUND_HALF_EVEN",
+        "tests/unit/ledger/calculators/test_reference_cases.py::test_gic_textbook_half_up_rounding",
+    ),
+    Mutation(
+        "calc: loan payment rounds up",
+        "app/ledger/calculators/loan.py",
+        "payment = ceil_cents(divide(multiply(inputs.principal, i)",
+        "payment = half_up_cents(divide(multiply(inputs.principal, i)",
+        "tests/unit/ledger/calculators/test_reference_cases.py::test_loan_textbook_canadian_mortgage_semiannual_compounding",
+    ),
+    Mutation(
+        "calc: loan final payment",
+        "app/ledger/calculators/loan.py",
+        "LoanRow(number=number, payment=balance + interest,",
+        "LoanRow(number=number, payment=payment,",
+        "tests/unit/ledger/calculators/test_properties.py::test_loan_schedule_is_exact",
+    ),
+    Mutation(
+        "calc: loan first-row guard",
+        "app/ledger/calculators/loan.py",
+        "    if n > 1 and first_interest >= payment:",
+        "    if False:",
+        "tests/unit/ledger/calculators/test_reference_cases.py::test_loan_too_small_to_amortize_in_cents_is_refused",
+    ),
+    Mutation(
+        "calc: loan renewal balance",
+        "app/ledger/calculators/loan.py",
+        "balance_at_end=inputs.principal - principal_paid,",
+        "balance_at_end=inputs.principal - principal_paid - interest_paid,",
+        "tests/unit/ledger/calculators/test_reference_cases.py"
+        "::test_loan_five_year_term_on_25_year_amortization_gives_the_renewal_balance",
+        also=(
+            Edit(
+                "app/ledger/calculators/loan.py",
+                "    principal_paid = sum((r.principal for r in within), ZERO)\n",
+                "    principal_paid = sum((r.principal for r in within), ZERO)\n"
+                "    interest_paid = sum((r.interest for r in within), ZERO)\n",
+            ),
+        ),
+    ),
+    Mutation(
+        "calc: term within amortization",
+        "app/ledger/calculators/loan.py",
+        "if self.term_years is not None and self.term_years > self.amortization_years:",
+        "if False:",
+        "tests/unit/ledger/calculators/test_reference_cases.py::test_loan_term_longer_than_amortization_is_rejected",
+    ),
+    Mutation(
+        "calc: goal rounds up",
+        "app/ledger/calculators/savings.py",
+        "per_pay=ceil_cents(",
+        "per_pay=half_up_cents(",
+        "tests/unit/ledger/calculators/test_reference_cases.py::test_goal_rounds_up_so_the_target_is_reached",
+    ),
+    Mutation(
+        "calc: runway rounds down",
+        "app/ledger/calculators/savings.py",
+        "rounding=ROUND_FLOOR",
+        'rounding="ROUND_HALF_UP"',
+        "tests/unit/ledger/calculators/test_reference_cases.py::test_runway",
+    ),
     Mutation(
         "break-test guard",
         "scripts/break_test.py",

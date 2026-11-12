@@ -31,6 +31,7 @@ The Phase 1 spec is `docs/specs/phase1-questrade.md`. **Its Amendments section (
 - **gitleaks runs as a pre-commit hook** (`.githooks/pre-commit`, pinned image `gitleaks:v8.21.2@sha256:0e99e88…`). It fails closed: if neither a `gitleaks` binary nor Docker is available, the commit is blocked.
   - Enable it once per clone with `git config core.hooksPath .githooks`.
   - Never use `--no-verify`.
+  - A local `gitleaks` binary is used only if `gitleaks version` reports exactly the hook's `PINNED_VERSION` (8.21.2, the same as CI); any other local version is ignored in favour of the pinned image, and with neither available the commit is blocked. Bump `PINNED_VERSION`, the hook's `IMAGE` and `ci.yml` together (`tests/unit/test_precommit_hook.py` checks).
   - The hook scans the index git is actually committing (`GIT_INDEX_FILE`), so `commit -a` and `commit -- <path>` are covered. It snapshots that index for the Docker path, and blocks when the commit adds text lines but gitleaks reports 0 commits scanned. `tests/unit/test_precommit_hook.py` guards both.
 - GitHub secret scanning and push protection are enabled on the repo (by Rudra).
 
