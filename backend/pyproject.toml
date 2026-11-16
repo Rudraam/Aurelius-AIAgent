@@ -10,8 +10,8 @@ dependencies = [
     # On Linux it trusts only the OS CA store (no certifi), so the image needs ca-certificates.
     "httpx2>=2.16,<3",
     "cryptography>=43",
-    "pydantic>=2.9,<3",
-    "tzdata>=2025.2",
+    "pydantic>=2.14.2,<3",
+    "tzdata>=2026.6",
     "apscheduler>=3.11,<4",
 ]
 
@@ -20,12 +20,12 @@ aurelius = "app.cli:main"
 
 [dependency-groups]
 dev = [
-    "pytest>=8",
+    "pytest>=9.2.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
-    "mypy>=1.11",
+    "mypy>=2.4.1",
     "exchange-calendars>=4.13.2",
-    "hypothesis>=6.170.12",
+    "hypothesis>=6.170.14",
 ]
 
 [build-system]
