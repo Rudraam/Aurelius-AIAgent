@@ -43,7 +43,11 @@ def _unavailable(reason: str) -> None:
 def _docker_running() -> bool:
     if DOCKER is None:
         return False
-    probe = subprocess.run([DOCKER, "info"], capture_output=True, check=False, stdin=subprocess.DEVNULL)
+    try:
+        probe = subprocess.run([DOCKER, "info"], capture_output=True, check=False, stdin=subprocess.DEVNULL, timeout=15)
+    except subprocess.TimeoutExpired:
+        # A daemon that is still starting (or wedged) makes `docker info` hang; treat it as not running.
+        return False
     return probe.returncode == 0
 
 
