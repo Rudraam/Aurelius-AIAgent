@@ -21,7 +21,7 @@ aurelius = "app.cli:main"
 [dependency-groups]
 dev = [
     "pytest>=8",
-    "pytest-asyncio>=0.24",
+    "pytest-asyncio>=1.4.1.post1",
     "ruff>=0.6",
     "mypy>=1.11",
     "exchange-calendars>=4.13.2",
