@@ -58,6 +58,7 @@
 | P37 | **A replacement may correct the net pay.** The replacement plan carries the corrected amount; the paycheque row keeps the amount as first recorded (append-only). |
 | P38 | **A replacement uses today's config and the voided plan's policy version.** Config has no history, so "as of the original payday" (P30) filters dated entries (balances, room, room movements, goal adjustments) to on or before that payday; bills, goals and accounts are read as they are now. |
 | P39 | **No discarding a proposed plan.** A proposed plan can only be revised or approved; the `proposed → voided` transition is removed. A void without a replacement voids the paycheque (a new paycheque state, which needs a migration), and that frees the pay window for a new paycheque. |
+| P40 | **Balance entries and drift.** One entry per (account, as-of date). An entry dated earlier than the account's latest entry is refused (`Conflict`). An account's first entry is the baseline and gets no drift record. Every later entry is reconciled against the projection from the previous entry (P36) through its own date, and one drift row is stored for it, **including a zero difference**. |
 
 ## 0. Where this fits
 
