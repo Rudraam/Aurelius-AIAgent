@@ -300,6 +300,44 @@ MUTATIONS: tuple[Mutation, ...] = (
         "tests/unit/ledger/calculators/test_reference_cases.py::test_runway",
     ),
     Mutation(
+        "history: approved only",
+        "app/ledger/history.py",
+        "    return line.state is PlanState.APPROVED\n",
+        "    return True\n",
+        "tests/unit/ledger/test_history.py::test_only_approved_lines_flow",
+    ),
+    Mutation(
+        "history: kept money only",
+        "app/ledger/history.py",
+        "    return bucket in KEPT_BUCKETS or (bucket is Bucket.BILLS and reason_code == SINKING_REASON)\n",
+        "    return True\n",
+        "tests/unit/ledger/test_history.py::test_spent_buckets_do_not_flow",
+    ),
+    # The service mutations need a database (AURELIUS_TEST_DATABASE_URL or Docker). Without one the
+    # guarding test skips, exits 0 and is reported MISSED, never CAUGHT.
+    Mutation(
+        "balances: approved plans only",
+        "app/services/ledger/history.py",
+        "        .where(PlanRow.state == PlanState.APPROVED.value)\n",
+        "",
+        "tests/db/test_balances_service.py::test_voided_plan_lines_stop_counting",
+        also=(Edit("app/ledger/history.py", "    return line.state is PlanState.APPROVED\n", "    return True\n"),),
+    ),
+    Mutation(
+        "balances: no backdating",
+        "app/services/ledger/balances.py",
+        "if previous_row is not None and entry.as_of <= previous_row.as_of:",
+        "if False:",
+        "tests/db/test_balances_service.py::test_backdated_and_duplicate_entries_conflict",
+    ),
+    Mutation(
+        "balances: zero drift stored",
+        "app/services/ledger/balances.py",
+        "            if drift is not None:\n",
+        "            if drift is not None and drift.difference:\n",
+        "tests/db/test_balances_service.py::test_zero_drift_is_stored",
+    ),
+    Mutation(
         "break-test guard",
         "scripts/break_test.py",
         # Built with + so the joined text occurs only in the guard itself, not in this table.
