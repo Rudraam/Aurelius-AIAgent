@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from app.ledger.engine import ConservationError, RevisionError, RoomExceeded, allocate, revise
@@ -39,6 +39,7 @@ from app.ledger.policy import (
     cap_amount,
 )
 from app.ledger.snapshot import load_snapshot, plan_bytes, snapshot
+from tests.unit.ledger.factories import D, standard_inputs, standard_policy
 
 PROFILE = settings(max_examples=150, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 
@@ -331,11 +332,26 @@ def test_revisions_conserve_or_are_rejected(case: tuple[LedgerInputs, Allocation
         assert total <= allowed_room(inputs, kind)
 
 
+#: Always hits the cap (P19): with only bills and essentials to fund, 2000.00 net pay leaves far more than
+#: 50.00 for spending, so without the cap spending would exceed it. Random cases alone don't reach a
+#: binding cap on every run.
+CAPPED = (
+    standard_inputs(goals=()),
+    standard_policy(
+        buffer=None,
+        emergency_fund=None,
+        investing=None,
+        explore=None,
+        surplus=SurplusPolicy(spending_cap=FixedCap(kind="fixed", amount=D("50.00")), redirect_to="nonreg"),
+    ),
+)
+
+
 @PROFILE
-@given(ledger(), st.data())
-def test_spending_never_exceeds_an_active_cap(case: tuple[LedgerInputs, AllocationPolicy], data: st.DataObject) -> None:
-    """P19: with a spending cap, spending <= cap and every leftover cent goes to the redirect account,
-    also after a revision."""
+@given(ledger())
+@example(CAPPED)
+def test_spending_never_exceeds_an_active_cap(case: tuple[LedgerInputs, AllocationPolicy]) -> None:
+    """P19: with a spending cap, spending <= cap and every leftover cent goes to the redirect account."""
     inputs, policy = case
     if policy.surplus is None:
         return
@@ -344,6 +360,37 @@ def test_spending_never_exceeds_an_active_cap(case: tuple[LedgerInputs, Allocati
     assert plan.line("spending").amount <= cap
     if plan.line("spending").amount < cap:
         assert plan.line("surplus:nonreg").amount == 0  # surplus only gets money once spending is full
+
+
+def test_the_capped_example_binds() -> None:
+    """Keeps CAPPED meaningful: the cap must bind and surplus must receive the excess."""
+    inputs, policy = CAPPED
+    plan = allocate(inputs, policy)
+    assert plan.line("spending").amount == D("50.00")
+    assert plan.line("surplus:nonreg").amount > 0
+
+
+def test_revising_the_capped_example_keeps_spending_at_the_cap() -> None:
+    """P19 after a revision, deterministically: freeing 200.00 of groceries still leaves spending at the cap."""
+    inputs, policy = CAPPED
+    plan = allocate(inputs, policy)
+    revised = revise(plan, inputs, policy, {"essential:groceries": D("0.00")})
+    assert revised.line("spending").amount == D("50.00")
+    assert revised.line("surplus:nonreg").amount == plan.line("surplus:nonreg").amount + D("200.00")
+    assert revised.total() == inputs.net_pay
+
+
+@PROFILE
+@given(ledger(), st.data())
+def test_revised_spending_never_exceeds_an_active_cap(
+    case: tuple[LedgerInputs, AllocationPolicy], data: st.DataObject
+) -> None:
+    """P19 after a revision: spending stays <= cap and the plan still sums to net pay."""
+    inputs, policy = case
+    if policy.surplus is None:
+        return
+    cap = cap_amount(policy.surplus.spending_cap, inputs.net_pay)
+    plan = allocate(inputs, policy)
     editable = [line.line_id for line in plan.lines if line.bucket not in (Bucket.SPENDING, Bucket.SURPLUS)]
     if not editable:
         return

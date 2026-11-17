@@ -79,6 +79,16 @@ def test_ci_requires_docker_tests_to_actually_run():
     assert 'AURELIUS_REQUIRE_DOCKER: "1"' in job_text("pytest")
 
 
+def test_ci_requires_database_tests_on_the_pinned_postgres():
+    from app.db.backup import PG_IMAGE
+
+    job = job_text("pytest")
+    assert 'AURELIUS_REQUIRE_DATABASE: "1"' in job
+    assert "AURELIUS_TEST_DATABASE_URL: postgresql://aurelius@127.0.0.1:5432/postgres" in job
+    images = re.findall(r"^\s+image:\s*(\S+)", job, re.M)
+    assert images == [PG_IMAGE], "the CI Postgres service must use exactly app/db/backup.PG_IMAGE"
+
+
 def test_python_version_comes_from_pyproject_not_the_workflow():
     assert "python-version" not in CI
 

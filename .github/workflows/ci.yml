@@ -120,9 +120,25 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      # Same digest-pinned image as app/db/backup.PG_IMAGE (test_ci_workflow.py checks). Throwaway, trust auth.
+      postgres:
+        image: postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8
+        env:
+          POSTGRES_USER: aurelius
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aurelius"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     env:
       AURELIUS_LIVE_TESTS: "0"
       AURELIUS_REQUIRE_DOCKER: "1"  # deploy tests must run here, not skip
+      AURELIUS_TEST_DATABASE_URL: postgresql://aurelius@127.0.0.1:5432/postgres
+      AURELIUS_REQUIRE_DATABASE: "1"  # database tests must run here, not skip (M3 decision 2a)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
