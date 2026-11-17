@@ -11,7 +11,7 @@ adjustment, a new policy version.
 - **Policies**: versions are consecutive from 1; ``latest_policy`` is the one the engine uses.
 
 Each insert runs in a savepoint, so a uniqueness failure raises ``Conflict`` and leaves the caller's
-transaction usable. Balance entries and drift live with the plan loader, which they need.
+transaction usable. Balance entries and drift are in ``balances``.
 """
 
 from __future__ import annotations

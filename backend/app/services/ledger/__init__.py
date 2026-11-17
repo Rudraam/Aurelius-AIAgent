@@ -5,8 +5,9 @@ Every write takes an explicit ``now`` (an aware UTC datetime), so services never
 ``clock.toronto_today`` turns "now" into a Toronto date where a date is needed (P15).
 
 - ``config``: income sources, accounts, bills, budget lines, goals and bank holidays (editable, P29).
-- ``records``: balance entries with drift, contribution room, room movements, goal adjustments, policy
-  versions (all append-only).
+- ``records``: contribution room, room movements, goal adjustments, policy versions (append-only).
+- ``balances``: balance entries, projected balances and drift (P8, P36, P40).
+- ``history``: approved plan lines loaded for the pure rules in ``app.ledger.history``.
 - ``plans``: record a paycheque, revise, approve, void and replace, verify (P30, P32).
 - ``reports``: the month summary and the upcoming 30 days (P33).
 - ``seed``: the TOML seed, dry run by default (P34).
