@@ -14,7 +14,9 @@ Usage (Git Bash; from the repo root):
     cd "$T" && PYTHONPATH="$T" uv run --project <repo>/backend python scripts/break_test.py
 
 Each mutation is restored from a byte copy whether the test run passes, fails or is interrupted.
-Exit code 0 means every mutation was caught.
+A mutation is CAUGHT only when pytest exits 1 with an assertion failure in the targeted test; a
+setup or fixture error, a skip, failures elsewhere or exit codes 2-5 are HARNESS ERRORs. Exit code 0
+means every mutation was caught.
 """
 
 from __future__ import annotations
@@ -23,7 +25,9 @@ import os
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 
@@ -137,8 +141,10 @@ MUTATIONS: tuple[Mutation, ...] = (
         "revision spending cap (P19)",
         "app/ledger/engine.py",
         "            spending = min(left, cap_amount(policy.surplus.spending_cap, plan.net_pay))\n",
-        "",
-        "tests/unit/ledger/test_properties.py::test_spending_never_exceeds_an_active_cap",
+        # Keep the if-block valid: deleting the line left an empty block, a syntax error that the old
+        # harness counted as caught (found 2026-11-17).
+        "            spending = left\n",
+        "tests/unit/ledger/test_properties.py::test_revising_the_capped_example_keeps_spending_at_the_cap",
     ),
     Mutation(
         "order notice (P18)",
@@ -314,7 +320,7 @@ MUTATIONS: tuple[Mutation, ...] = (
         "tests/unit/ledger/test_history.py::test_spent_buckets_do_not_flow",
     ),
     # The service mutations need a database (AURELIUS_TEST_DATABASE_URL or Docker). Without one the
-    # guarding test skips, exits 0 and is reported MISSED, never CAUGHT.
+    # guarding test skips and the run is a HARNESS ERROR, never CAUGHT.
     Mutation(
         "balances: approved plans only",
         "app/services/ledger/history.py",
@@ -338,6 +344,14 @@ MUTATIONS: tuple[Mutation, ...] = (
         "tests/db/test_balances_service.py::test_zero_drift_is_stored",
     ),
     Mutation(
+        "break-test: any failure caught",
+        "scripts/break_test.py",
+        # The rule before 2026-11-17: any non-zero exit counted as caught, fixture errors included.
+        "    if returncode not in (0, 1):\n",
+        '    if returncode != 0:\n        return Verdict(Outcome.CAUGHT, "exit code")\n    if False:\n',
+        "tests/unit/test_break_test_guard.py",
+    ),
+    Mutation(
         "break-test guard",
         "scripts/break_test.py",
         # Built with + so the joined text occurs only in the guard itself, not in this table.
@@ -348,8 +362,89 @@ MUTATIONS: tuple[Mutation, ...] = (
 )
 
 
-def run_one(root: Path, mutation: Mutation) -> bool:
-    """Apply every edit, test, restore all. True if the guarding test failed (the mutation was caught)."""
+class Outcome(StrEnum):
+    CAUGHT = "CAUGHT"
+    #: The targeted test ran and passed with the mutation in place: the safety test is too weak.
+    MISSED = "MISSED"
+    #: Anything else: the run says nothing about the mutation, so it is never counted as caught.
+    HARNESS_ERROR = "HARNESS ERROR"
+
+
+@dataclass(frozen=True)
+class Verdict:
+    outcome: Outcome
+    detail: str
+
+
+def _matches(classname: str, name: str, target: str) -> bool:
+    """Whether a JUnit testcase is the target (a ``path.py::[Class::]test`` node ID or a whole file)."""
+    path, _, rest = target.partition("::")
+    module = path.removesuffix(".py").replace("/", ".")
+    if not rest:
+        return classname == module or classname.startswith(module + ".")
+    *classes, func = rest.split("::")
+    expected = ".".join([module, *classes])
+    return classname == expected and (name == func or name.startswith(func + "["))
+
+
+def classify(returncode: int, junit_xml: str | None, target: str) -> Verdict:
+    """CAUGHT only if pytest exited 1 and the failures are assertion failures in the targeted test.
+
+    Setup or fixture errors (JUnit ``<error>``), failures only in other tests, a skipped or uncollected
+    target, a missing report and exit codes 2-5 are harness errors, never caught.
+    """
+    if returncode not in (0, 1):
+        return Verdict(Outcome.HARNESS_ERROR, f"pytest exited {returncode}")
+    if junit_xml is None:
+        return Verdict(Outcome.HARNESS_ERROR, "no JUnit report")
+    try:
+        cases = ET.fromstring(junit_xml).iter("testcase")  # noqa: S314 - the report our own pytest just wrote
+    except ET.ParseError as exc:
+        return Verdict(Outcome.HARNESS_ERROR, f"unreadable JUnit report: {exc}")
+    targeted: list[str] = []
+    failed_targeted = failed_other = errors = 0
+    for case in cases:
+        hit = _matches(case.get("classname", ""), case.get("name", ""), target)
+        if case.find("error") is not None:
+            errors += 1
+            continue
+        if case.find("failure") is not None:
+            failed_targeted += hit
+            failed_other += not hit
+            continue
+        if hit:
+            targeted.append("skipped" if case.find("skipped") is not None else "passed")
+    if errors:
+        return Verdict(Outcome.HARNESS_ERROR, f"{errors} test error(s) (setup, fixture or collection)")
+    if returncode == 1:
+        if failed_targeted:
+            return Verdict(Outcome.CAUGHT, f"{failed_targeted} targeted failure(s)")
+        detail = f"{failed_other} failure(s), none in the target" if failed_other else "exit 1 with no failure"
+        return Verdict(Outcome.HARNESS_ERROR, detail)
+    if "passed" in targeted:
+        return Verdict(Outcome.MISSED, "the targeted test passed")
+    return Verdict(Outcome.HARNESS_ERROR, "the target was skipped" if targeted else "the target did not run")
+
+
+def run_pytest(root: Path, target: str) -> tuple[int, str | None]:
+    """Run one target in ``root`` and return pytest's exit code and its JUnit XML report."""
+    report = root / ".break-test-junit.xml"
+    report.unlink(missing_ok=True)
+    result = subprocess.run(  # noqa: S603 - fixed argv, our own interpreter
+        [sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider", f"--junitxml={report}", target],
+        cwd=root,
+        env={**os.environ, "PYTHONPATH": str(root)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    xml = report.read_text(encoding="utf-8") if report.exists() else None
+    report.unlink(missing_ok=True)
+    return result.returncode, xml
+
+
+def run_one(root: Path, mutation: Mutation) -> Verdict:
+    """Apply every edit, run the guarding test, restore all, and classify the run."""
     originals: dict[Path, bytes] = {}
     try:
         for edit in mutation.edits():
@@ -360,18 +455,11 @@ def run_one(root: Path, mutation: Mutation) -> bool:
             if found == 0 or (found != 1 and not edit.every):
                 raise RuntimeError(f"{mutation.name}: anchor found {found} times in {edit.path}")
             path.write_bytes(text.replace(edit.old, edit.new).encode("utf-8"))
-        result = subprocess.run(  # noqa: S603 - fixed argv, our own interpreter
-            [sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider", mutation.test],
-            cwd=root,
-            env={**os.environ, "PYTHONPATH": str(root)},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        returncode, xml = run_pytest(root, mutation.test)
     finally:
         for path, original in originals.items():
             path.write_bytes(original)
-    return result.returncode != 0
+    return classify(returncode, xml, mutation.test)
 
 
 def main() -> int:
@@ -380,13 +468,17 @@ def main() -> int:
     except UnsafeWorkdir as exc:
         print(f"break_test: REFUSED. {exc}", file=sys.stderr)
         return 2
-    missed = 0
+    tally = dict.fromkeys(Outcome, 0)
     for mutation in MUTATIONS:
-        caught = run_one(root, mutation)
-        missed += not caught
-        print(f"{'CAUGHT' if caught else 'MISSED'}  {mutation.name:28} -> {mutation.test.split('::')[-1]}")
-    print("ALL CAUGHT" if not missed else f"{missed} MISSED")
-    return 1 if missed else 0
+        verdict = run_one(root, mutation)
+        tally[verdict.outcome] += 1
+        test = mutation.test.split("::")[-1]
+        print(f"{verdict.outcome:13}  {mutation.name:30} -> {test}  ({verdict.detail})")
+    if tally[Outcome.CAUGHT] == len(MUTATIONS):
+        print("ALL CAUGHT")
+        return 0
+    print(", ".join(f"{count} {outcome}" for outcome, count in tally.items()))
+    return 1
 
 
 if __name__ == "__main__":
